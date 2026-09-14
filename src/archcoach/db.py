@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sqlite3
 import uuid
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -11,7 +14,6 @@ from .models import ProjectCreate, ProjectUpdate, utc_now
 
 
 SCHEMA = """
-PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE,
@@ -59,14 +61,70 @@ CREATE TABLE IF NOT EXISTS lesson_progress (
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);
 """
 
+SCHEMA_VERSION = 2
+MIGRATION_2 = (
+    "ALTER TABLE projects ADD COLUMN normalized_path TEXT",
+    "ALTER TABLE projects ADD COLUMN last_attempted_at TEXT",
+    "ALTER TABLE projects ADD COLUMN schedule_error TEXT",
+    "ALTER TABLE snapshots ADD COLUMN config_fingerprint TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE snapshots ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE reviews ADD COLUMN quality TEXT NOT NULL DEFAULT 'legacy'",
+    "ALTER TABLE reviews ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE reviews ADD COLUMN positions_json TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE jobs ADD COLUMN stage TEXT NOT NULL DEFAULT 'queued'",
+    "ALTER TABLE jobs ADD COLUMN error_code TEXT",
+    "ALTER TABLE jobs ADD COLUMN usage_json TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE jobs ADD COLUMN last_activity_at TEXT",
+    "ALTER TABLE jobs ADD COLUMN scheduled_for TEXT",
+    "ALTER TABLE jobs ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'",
+    "ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT 'complete'",
+    "CREATE TABLE check_events (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, review_id TEXT REFERENCES reviews(id), created_at TEXT NOT NULL, source_fingerprint TEXT NOT NULL, config_fingerprint TEXT NOT NULL, result TEXT NOT NULL)",
+    "CREATE INDEX check_events_project_idx ON check_events(project_id, created_at DESC)",
+)
+
+
+def canonical_path(path: Path) -> str:
+    return os.path.normcase(str(path.expanduser().resolve())).casefold()
+
 
 class Store:
     def __init__(self, path: Path):
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
-        with self.connect() as conn:
-            conn.executescript(SCHEMA)
-            conn.execute("UPDATE jobs SET status='failed', error='App stopped during this job', finished_at=? WHERE status='running'", (utc_now(),))
+        self._migrate()
+
+    def _migrate(self) -> None:
+        existed = self.path.exists() and self.path.stat().st_size > 0
+        with sqlite3.connect(self.path, timeout=30) as probe:
+            version = probe.execute("PRAGMA user_version").fetchone()[0]
+        if existed and version < SCHEMA_VERSION:
+            backup_dir = self.path.parent / "backups"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            shutil.copy2(self.path, backup_dir / f"{self.path.stem}-v{version}-{stamp}.db")
+        with sqlite3.connect(self.path, timeout=30) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA foreign_keys=ON")
+            if version == 0:
+                conn.executescript(f"BEGIN IMMEDIATE;\n{SCHEMA}\nPRAGMA user_version=1;\nCOMMIT;")
+                version = 1
+            if version == 1:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    for statement in MIGRATION_2:
+                        conn.execute(statement)
+                    rows = conn.execute("SELECT id,path FROM projects").fetchall()
+                    for project_id, project_path in rows:
+                        conn.execute("UPDATE projects SET normalized_path=? WHERE id=?", (canonical_path(Path(project_path)), project_id))
+                    conn.execute("CREATE UNIQUE INDEX projects_normalized_path_idx ON projects(normalized_path)")
+                    conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+                version = SCHEMA_VERSION
+            if version != SCHEMA_VERSION:
+                raise RuntimeError(f"Unsupported database schema version: {version}")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -97,9 +155,9 @@ class Store:
         with self.connect() as conn:
             try:
                 conn.execute(
-                    "INSERT INTO projects VALUES(?,?,?,?,?,?,?,?,?,1)",
+                    "INSERT INTO projects(id,name,path,description,goal,exclusions_json,interval_days,created_at,last_checked_at,enabled,normalized_path) VALUES(?,?,?,?,?,?,?,?,?,1,?)",
                     (project_id, request.name or path.name, str(path), request.description, request.goal,
-                     json.dumps(request.exclusions), request.interval_days, utc_now(), None),
+                     json.dumps(request.exclusions), request.interval_days, utc_now(), None, canonical_path(path)),
                 )
             except sqlite3.IntegrityError as exc:
                 raise ValueError("That project folder is already registered") from exc
@@ -137,7 +195,7 @@ class Store:
     def create_snapshot(self, project_id: str, fingerprint: str, manifest: list[dict], git: dict, analysis: dict, coverage: dict) -> str:
         snapshot_id = uuid.uuid4().hex
         with self.connect() as conn:
-            conn.execute("INSERT INTO snapshots VALUES(?,?,?,?,?,?,?,?)", (snapshot_id, project_id, utc_now(), fingerprint, json.dumps(manifest), json.dumps(git), json.dumps(analysis), json.dumps(coverage)))
+            conn.execute("INSERT INTO snapshots(id,project_id,created_at,fingerprint,manifest_json,git_json,analysis_json,coverage_json) VALUES(?,?,?,?,?,?,?,?)", (snapshot_id, project_id, utc_now(), fingerprint, json.dumps(manifest), json.dumps(git), json.dumps(analysis), json.dumps(coverage)))
         return snapshot_id
 
     def get_snapshot(self, snapshot_id: str) -> dict[str, Any]:
@@ -170,7 +228,7 @@ class Store:
     def create_review(self, project_id: str, snapshot_id: str, prior_id: str | None, status: str, architecture: dict, critique: dict, changes: dict, artifacts: dict, reused_from_id: str | None = None, error: str | None = None) -> str:
         review_id = uuid.uuid4().hex
         with self.connect() as conn:
-            conn.execute("INSERT INTO reviews VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (review_id, project_id, snapshot_id, prior_id, utc_now(), status, json.dumps(architecture), json.dumps(critique), json.dumps(changes), json.dumps(artifacts), reused_from_id, error))
+            conn.execute("INSERT INTO reviews(id,project_id,snapshot_id,prior_review_id,created_at,status,architecture_json,critique_json,changes_json,artifacts_json,reused_from_id,error) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (review_id, project_id, snapshot_id, prior_id, utc_now(), status, json.dumps(architecture), json.dumps(critique), json.dumps(changes), json.dumps(artifacts), reused_from_id, error))
         return review_id
 
     def enqueue(self, operation: str, project_id: str | None, payload: dict | None = None, review_id: str | None = None, priority: int = 10) -> str:
@@ -209,7 +267,7 @@ class Store:
     def add_message(self, conversation_id: str, role: str, content: str, citations: list | None = None) -> str:
         message_id = uuid.uuid4().hex
         with self.connect() as conn:
-            conn.execute("INSERT INTO messages VALUES(?,?,?,?,?,?)", (message_id, conversation_id, role, content, json.dumps(citations or []), utc_now()))
+            conn.execute("INSERT INTO messages(id,conversation_id,role,content,citations_json,created_at) VALUES(?,?,?,?,?,?)", (message_id, conversation_id, role, content, json.dumps(citations or []), utc_now()))
         return message_id
 
     def conversation_for_review(self, review_id: str) -> dict[str, Any]:
