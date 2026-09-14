@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} · Architecture Coach{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div><p class="eyebrow">Project</p><h1>{{ project.name }}</h1><p class="lede">{{ project.description or project.path }}</p></div>
+  <form method="post" action="/projects/{{ project.id }}/review?token={{ csrf_token }}"><button class="primary" type="submit">Review current files</button></form>
+</header>
+<div class="path-strip"><span>Local folder</span><code>{{ project.path }}</code></div>
+{% if project.goal %}<section class="panel"><p class="eyebrow">Current goal</p><p>{{ project.goal }}</p></section>{% endif %}
+<section class="section-head"><div><p class="eyebrow">Timeline</p><h2>Review history</h2></div></section>
+{% if reviews %}
+<div class="timeline">
+  {% for item in reviews %}
+  <a href="/reviews/{{ item.id }}" class="timeline-item"><span class="timeline-dot"></span><div><h3>{{ item.created_at[:10] }}</h3><p>{{ 'No source changes' if item.status == 'unchanged' else item.architecture.summary }}</p></div><span class="pill {{ 'ok' if item.status in ['complete','unchanged'] else 'warn' }}">{{ item.status }}</span></a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state compact"><h2>Your first review is ready to run</h2><p>It will capture the current source, map the architecture, and prepare lessons.</p></div>
+{% endif %}
+{% endblock %}
+

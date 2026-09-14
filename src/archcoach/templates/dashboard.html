@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Projects · Architecture Coach{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div><p class="eyebrow">Your software, explained</p><h1>Architecture Coach</h1><p class="lede">Understand how each project fits together, see what changed, and learn one useful idea at a time.</p></div>
+  <span class="pill {{ 'ok' if codex.authenticated else 'warn' }}">Codex {{ 'ready' if codex.authenticated else 'needs attention' }}</span>
+</header>
+
+{% if request.query_params.get('error') %}<div class="notice error">{{ request.query_params.get('error') }}</div>{% endif %}
+
+<section class="section-head"><div><p class="eyebrow">Library</p><h2>Your projects</h2></div><button class="primary" data-dialog="add-project">Add a project</button></section>
+
+{% if projects %}
+<div class="project-grid">
+  {% for item in projects %}
+  <a class="project-card" href="/projects/{{ item.id }}">
+    <div class="card-top"><span class="folder-icon">⌁</span><span class="pill subtle">{{ item.interval_days }} day cycle</span></div>
+    <h3>{{ item.name }}</h3><p>{{ item.description or 'Add a description to help the coach understand this project.' }}</p>
+    <div class="card-meta"><span>{{ 'Reviewed' if item.latest_review else 'Waiting for first review' }}</span><b>{{ item.next_review }}</b></div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state"><div class="empty-mark">⌘</div><h2>Add your first project</h2><p>Choose any local folder. Architecture Coach reads source files safely and stores its reports separately.</p><button class="primary" data-dialog="add-project">Choose a folder path</button></div>
+{% endif %}
+
+<dialog id="add-project">
+  <form method="post" action="/projects?token={{ csrf_token }}">
+    <div class="dialog-head"><div><p class="eyebrow">New project</p><h2>What should we review?</h2></div><button type="button" class="icon-button" data-close>×</button></div>
+    <label>Folder path<input name="path" required placeholder="C:\Users\you\Documents\my-project"></label>
+    <label>Project name <span>optional</span><input name="name" placeholder="Uses the folder name by default"></label>
+    <label>What does it do? <span>optional</span><textarea name="description" rows="3"></textarea></label>
+    <label>What are you building next? <span>optional</span><textarea name="goal" rows="2"></textarea></label>
+    <div class="dialog-actions"><button type="button" class="quiet" data-close>Cancel</button><button class="primary" type="submit">Add project</button></div>
+  </form>
+</dialog>
+{% endblock %}
+

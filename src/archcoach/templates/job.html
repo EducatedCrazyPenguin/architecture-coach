@@ -1,0 +1,4 @@
+{% extends "base.html" %}
+{% block title %}Working · Architecture Coach{% endblock %}
+{% block content %}<div class="job-wrap"><p class="eyebrow">Architecture Coach</p><h1>Working on your request</h1><div id="job-state" hx-get="/jobs/{{ job.id }}" hx-trigger="load, every 1s" hx-swap="outerHTML">{% include "_job.html" %}</div></div>{% endblock %}
+

@@ -1,0 +1,9 @@
+{
+  "name": "architecture-coach-tools",
+  "private": true,
+  "version": "0.1.0",
+  "devDependencies": {
+    "htmx.org": "2.0.8",
+    "typescript": "6.0.2"
+  }
+}
