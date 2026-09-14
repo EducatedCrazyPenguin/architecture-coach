@@ -17,7 +17,7 @@ from .ai import CodexAdapter
 from .config import Settings
 from .db import Store
 from .models import ChatRequest, LessonStatusRequest, ProjectCreate, ProjectUpdate
-from .review import ReviewEngine, source_text
+from .review import ReviewEngine, compare_saved_reviews, source_text
 from .worker import Worker
 
 
@@ -83,6 +83,25 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         current = __import__("archcoach.capture", fromlist=["capture_project"]).capture_project(settings, project)
         stale = current["fingerprint"] != snapshot["fingerprint"]
         return templates.TemplateResponse(request=request, name="review.html", context=context(request, page="review", project=project, review=review, snapshot=snapshot, lesson_statuses=store.lesson_statuses(review_id), conversation=conversation, stale=stale))
+
+    def comparison(project_id: str, before_id: str | None, after_id: str | None):
+        project = store.get_project(project_id)
+        reviews = [item for item in store.list_reviews(project_id) if item["status"] in {"complete", "unchanged"}]
+        if len(reviews) < 2:
+            raise HTTPException(409, "Two successful reviews are required")
+        before_id = before_id or reviews[1]["id"]
+        after_id = after_id or reviews[0]["id"]
+        before = store.get_review(before_id); after = store.get_review(after_id)
+        if before["project_id"] != project_id or after["project_id"] != project_id:
+            raise HTTPException(404)
+        before_snapshot = store.get_snapshot(before["snapshot_id"]); after_snapshot = store.get_snapshot(after["snapshot_id"])
+        return project, reviews, before, after, compare_saved_reviews(before, before_snapshot, after, after_snapshot)
+
+    @app.get("/projects/{project_id}/compare", response_class=HTMLResponse)
+    def compare_page(project_id: str, request: Request, before: str | None = None, after: str | None = None):
+        try: project, reviews, before_review, after_review, changes = comparison(project_id, before, after)
+        except KeyError: raise HTTPException(404)
+        return templates.TemplateResponse(request=request, name="compare.html", context=context(request, page="compare", project=project, reviews=reviews, before=before_review, after=after_review, changes=changes))
 
     @app.post("/projects")
     def add_project(request: Request, path: str = Form(), name: str = Form(default=""), description: str = Form(default=""), goal: str = Form(default="")):
@@ -181,6 +200,20 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     def api_project(project_id: str):
         try: return store.get_project(project_id)
         except KeyError: raise HTTPException(404)
+
+    @app.get("/api/projects/{project_id}/reviews")
+    def api_reviews(project_id: str):
+        try: store.get_project(project_id)
+        except KeyError: raise HTTPException(404)
+        return store.list_reviews(project_id)
+
+    @app.get("/api/projects/{project_id}/comparison")
+    def api_comparison(project_id: str, before: str | None = None, after: str | None = None):
+        try:
+            _, _, before_review, after_review, changes = comparison(project_id, before, after)
+        except KeyError:
+            raise HTTPException(404)
+        return {"before_review_id": before_review["id"], "after_review_id": after_review["id"], "changes": changes}
 
     @app.patch("/api/projects/{project_id}")
     def api_update_project(project_id: str, data: ProjectUpdate, request: Request):

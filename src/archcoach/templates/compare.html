@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Compare · {{ project.name }}{% endblock %}
+{% macro list_changes(title, items, tone='') %}
+<article class="compare-card {{ tone }}"><h3>{{ title }}</h3><strong>{{ items|length }}</strong>{% if items %}<ul>{% for item in items %}<li>{{ item|join(' → ') if item is not string else item }}</li>{% endfor %}</ul>{% else %}<p class="muted">None</p>{% endif %}</article>
+{% endmacro %}
+{% block content %}
+<header class="page-head"><div><a class="back" href="/projects/{{ project.id }}">← {{ project.name }}</a><p class="eyebrow">Architecture history</p><h1>Compare two saved reviews</h1><p class="lede">This comparison uses captured source and stable component IDs. Diagram placement and rewritten explanations do not count as architecture changes.</p></div></header>
+<form class="compare-picker" method="get" action="/projects/{{ project.id }}/compare">
+  <label>Earlier review<select name="before">{% for item in reviews %}<option value="{{ item.id }}" {{ 'selected' if item.id == before.id }}>{{ item.created_at[:19]|replace('T', ' · ') }} · {{ item.id[:7] }}</option>{% endfor %}</select></label>
+  <span>→</span>
+  <label>Later review<select name="after">{% for item in reviews %}<option value="{{ item.id }}" {{ 'selected' if item.id == after.id }}>{{ item.created_at[:19]|replace('T', ' · ') }} · {{ item.id[:7] }}</option>{% endfor %}</select></label>
+  <button class="primary" type="submit">Compare</button>
+</form>
+{% if before.id == after.id %}<div class="notice warn">Choose two different reviews to see a meaningful comparison.</div>{% endif %}
+<section class="review-section"><p class="eyebrow">Architecture</p><h2>Component and dependency changes</h2><div class="compare-grid">{{ list_changes('Components added', changes.components_added, 'added') }}{{ list_changes('Components changed', changes.components_changed, 'changed') }}{{ list_changes('Components removed', changes.components_removed, 'removed') }}{{ list_changes('Dependencies added', changes.relationships_added, 'added') }}{{ list_changes('Dependencies removed', changes.relationships_removed, 'removed') }}</div></section>
+<section class="review-section"><p class="eyebrow">Captured source</p><h2>File changes</h2><div class="compare-grid">{{ list_changes('Files added', changes.files_added, 'added') }}{{ list_changes('Files changed', changes.files_changed, 'changed') }}{{ list_changes('Files removed', changes.files_removed, 'removed') }}</div></section>
+<section class="review-section"><p class="eyebrow">Review snapshots</p><h2>Inspect either architecture</h2><div class="snapshot-links"><a class="secondary button-link" href="/reviews/{{ before.id }}">Open earlier review</a><a class="secondary button-link" href="/reviews/{{ after.id }}">Open later review</a></div></section>
+{% endblock %}

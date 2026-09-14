@@ -80,3 +80,33 @@ def test_project_settings_update_schedule_goal_and_exclusions(tmp_path: Path):
     assert form_saved["name"] == "Form update"
     assert form_saved["enabled"] == 1
     assert form_saved["exclusions"] == ["reports/**", "cache/"]
+
+
+def test_review_history_can_compare_any_two_snapshots(tmp_path: Path):
+    project = tmp_path / "project"; project.mkdir()
+    app_file = project / "app.py"; app_file.write_text("def main():\n    return 1\n", encoding="utf-8")
+    app, client = make_client(tmp_path); token = app.state.csrf_token
+    created = client.post("/api/projects", headers={"X-ArchCoach-Token": token}, json={"path": str(project)}).json()
+    from archcoach.review import ReviewEngine
+    from tests.test_review import OfflineCodex
+    engine = ReviewEngine(app.state.settings, app.state.store, OfflineCodex())
+    before = engine.run(created["id"])
+
+    app_file.write_text("def main():\n    return 2\n", encoding="utf-8")
+    services = project / "services"; services.mkdir()
+    (services / "auth.py").write_text("def authenticate():\n    return True\n", encoding="utf-8")
+    after = engine.run(created["id"])
+
+    history = client.get(f"/api/projects/{created['id']}/reviews")
+    assert history.status_code == 200
+    assert [item["id"] for item in history.json()] == [after, before]
+    response = client.get(f"/api/projects/{created['id']}/comparison", params={"before": before, "after": after})
+    assert response.status_code == 200
+    changes = response.json()["changes"]
+    assert changes["files_added"] == ["services/auth.py"]
+    assert changes["files_changed"] == ["app.py"]
+    assert "services" in changes["components_added"]
+    page = client.get(f"/projects/{created['id']}/compare", params={"before": before, "after": after})
+    assert page.status_code == 200
+    assert "Compare two saved reviews" in page.text
+    assert "services/auth.py" in page.text

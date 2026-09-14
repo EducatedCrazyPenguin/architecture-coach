@@ -108,6 +108,28 @@ def calculate_changes(previous: dict | None, previous_snapshot: dict | None, cur
     return {"baseline": False, "components_added": sorted(after_components.keys() - before_components.keys()), "components_removed": sorted(before_components.keys() - after_components.keys()), "components_changed": sorted(k for k in before_components.keys() & after_components.keys() if before_components[k] != after_components[k]), "relationships_added": sorted(list(after_rel - before_rel)), "relationships_removed": sorted(list(before_rel - after_rel)), "files_added": sorted(new_files.keys() - old_files.keys()), "files_removed": sorted(old_files.keys() - new_files.keys()), "files_changed": sorted(k for k in new_files.keys() & old_files.keys() if new_files[k] != old_files[k])}
 
 
+def compare_saved_reviews(before: dict, before_snapshot: dict, after: dict, after_snapshot: dict) -> dict:
+    before_architecture = Architecture.model_validate(before["architecture"])
+    after_architecture = Architecture.model_validate(after["architecture"])
+    before_components = {item.id: item.model_dump() for item in before_architecture.components}
+    after_components = {item.id: item.model_dump() for item in after_architecture.components}
+    before_relationships = {(item.source, item.target, item.label) for item in before_architecture.relationships}
+    after_relationships = {(item.source, item.target, item.label) for item in after_architecture.relationships}
+    before_files = {item["path"]: item["sha256"] for item in before_snapshot["manifest"]}
+    after_files = {item["path"]: item["sha256"] for item in after_snapshot["manifest"]}
+    return {
+        "baseline": False,
+        "components_added": sorted(after_components.keys() - before_components.keys()),
+        "components_removed": sorted(before_components.keys() - after_components.keys()),
+        "components_changed": sorted(key for key in before_components.keys() & after_components.keys() if before_components[key] != after_components[key]),
+        "relationships_added": sorted(after_relationships - before_relationships),
+        "relationships_removed": sorted(before_relationships - after_relationships),
+        "files_added": sorted(after_files.keys() - before_files.keys()),
+        "files_removed": sorted(before_files.keys() - after_files.keys()),
+        "files_changed": sorted(key for key in before_files.keys() & after_files.keys() if before_files[key] != after_files[key]),
+    }
+
+
 class ReviewEngine:
     def __init__(self, settings: Settings, store: Store, codex: CodexAdapter | None = None):
         self.settings, self.store, self.codex = settings, store, codex or CodexAdapter(settings)
