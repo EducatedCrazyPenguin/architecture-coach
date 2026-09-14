@@ -11,7 +11,7 @@ from .capture import capture_project, materialize_snapshot, read_blob
 from .config import Settings
 from .db import Store
 from .diagram import render_comparison, render_diagram
-from .models import Architecture, Component, Critique, Evidence, Finding, Lesson, Relationship, utc_now
+from .models import Architecture, ChatResponse, Component, Critique, Evidence, Finding, Lesson, Relationship, utc_now
 
 
 def _slug(text: str, fallback: str) -> str:
@@ -81,6 +81,14 @@ def validate_evidence(model, manifest: list[dict]):
             for evidence in item.sources if hasattr(item, "sources") else item.evidence:
                 evidence.valid = evidence.path in lines and 1 <= evidence.line <= max(1, lines.get(evidence.path, 0)) and (evidence.end_line is None or evidence.end_line <= max(1, lines.get(evidence.path, 0)))
     return model
+
+
+def validate_evidence_items(items: list[Evidence], manifest: list[dict]) -> list[Evidence]:
+    lines = {item["path"]: item["lines"] for item in manifest}
+    for evidence in items:
+        last_line = max(1, lines.get(evidence.path, 0))
+        evidence.valid = evidence.path in lines and 1 <= evidence.line <= last_line and (evidence.end_line is None or evidence.end_line <= last_line)
+    return items
 
 
 def validate_critique_quality(critique: Critique) -> Critique:
@@ -170,11 +178,13 @@ class ReviewEngine:
             root = Path(temp); materialize_snapshot(self.settings, snapshot, root)
             (root / "review-context.json").write_text(json.dumps({"architecture": review["architecture"], "critique": review["critique"], "changes": review["changes"]}, indent=2), encoding="utf-8")
             try:
-                response = self.codex.run_structured(CHAT_PROMPT.format(history=history, message=message), self.settings.schema_dir / "chat.json", root)
-                answer = response["answer"]
-            except (CodexError, KeyError, json.JSONDecodeError) as exc:
+                response = ChatResponse.model_validate(self.codex.run_structured(CHAT_PROMPT.format(history=history, message=message), self.settings.schema_dir / "chat.json", root))
+                citations = validate_evidence_items(response.citations, snapshot["manifest"])
+                answer = response.answer
+            except (CodexError, ValueError, KeyError, json.JSONDecodeError) as exc:
                 answer = f"I could not run Codex for this question: {exc}. The saved review remains available."
-        self.store.add_message(conversation["id"], "assistant", answer)
+                citations = []
+        self.store.add_message(conversation["id"], "assistant", answer, [item.model_dump() for item in citations])
         return conversation["id"]
 
 

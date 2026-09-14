@@ -122,5 +122,11 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
 
 
+class ChatResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    answer: str = Field(min_length=1, max_length=12000)
+    citations: list[Evidence] = Field(default_factory=list, max_length=12)
+
+
 class LessonStatusRequest(BaseModel):
     status: Literal["unread", "learning", "understood"]

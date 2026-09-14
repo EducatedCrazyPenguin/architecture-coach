@@ -35,6 +35,7 @@ def test_source_view_escapes_snapshot_content(tmp_path: Path):
     response = client.get(f"/reviews/{review_id}/source", params={"path": "bad.html"})
     assert "&lt;script&gt;" in response.text
     assert "<script>alert" not in response.text
+    assert 'id="L1" class="source-line selected"' in response.text
 
 
 def test_project_settings_update_schedule_goal_and_exclusions(tmp_path: Path):

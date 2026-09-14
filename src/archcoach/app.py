@@ -160,8 +160,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         try:
             review = store.get_review(review_id); snapshot = store.get_snapshot(review["snapshot_id"]); content = source_text(settings, snapshot, path)
         except KeyError: raise HTTPException(404)
-        numbered = "\n".join(f"{i:5}  {html.escape(text)}" for i, text in enumerate(content.splitlines(), 1))
-        return HTMLResponse(f"<!doctype html><title>{html.escape(path)}</title><style>body{{font:14px ui-monospace;background:#fafbfe;color:#182033;padding:24px}}pre{{white-space:pre-wrap}}mark{{background:#fff0a8}}</style><h1>{html.escape(path)}</h1><pre>{numbered}</pre>")
+        numbered = "\n".join(f'<span id="L{i}" class="source-line{' selected' if i == line else ''}"><b>{i:5}</b>  {html.escape(text)}</span>' for i, text in enumerate(content.splitlines(), 1))
+        return HTMLResponse(f"<!doctype html><title>{html.escape(path)}</title><style>body{{font:14px ui-monospace;background:#fafbfe;color:#182033;padding:24px}}pre{{white-space:pre-wrap}}.source-line{{display:block;scroll-margin-top:24px}}.source-line b{{color:#8a93a6;font-weight:400}}.source-line.selected{{background:#fff0a8}}</style><h1>{html.escape(path)}</h1><pre>{numbered}</pre><script>document.getElementById('L{line}')?.scrollIntoView()</script>")
 
     @app.get("/artifacts/{review_id}/{name}")
     def artifact(review_id: str, name: str):
