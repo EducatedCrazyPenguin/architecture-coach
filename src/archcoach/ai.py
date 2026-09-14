@@ -26,14 +26,14 @@ class CodexAdapter:
 
     def status(self) -> dict:
         if not self.available():
-            return {"available": False, "authenticated": False, "message": "Codex CLI was not found"}
+            return {"available": False, "authenticated": False, "message": "Codex CLI was not found", "command": self.settings.codex_command}
         env = self._env()
         try:
             result = subprocess.run([self.settings.codex_command, "login", "status"], capture_output=True, text=True, timeout=15, env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            output = (result.stdout + result.stderr).strip()
-            return {"available": True, "authenticated": result.returncode == 0, "message": output}
+            output = result.stdout.strip() or result.stderr.strip()
+            return {"available": True, "authenticated": result.returncode == 0, "message": output, "command": self.settings.codex_command}
         except (OSError, subprocess.TimeoutExpired) as exc:
-            return {"available": True, "authenticated": False, "message": str(exc)}
+            return {"available": True, "authenticated": False, "message": str(exc), "command": self.settings.codex_command}
 
     def _env(self) -> dict[str, str]:
         env = os.environ.copy()

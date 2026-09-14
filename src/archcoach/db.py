@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from .models import ProjectCreate, utc_now
+from .models import ProjectCreate, ProjectUpdate, utc_now
 
 
 SCHEMA = """
@@ -118,14 +118,21 @@ class Store:
             raise KeyError(project_id)
         return result
 
-    def update_project(self, project_id: str, **fields: Any) -> None:
-        allowed = {"name", "description", "goal", "interval_days", "enabled", "last_checked_at"}
+    def update_project(self, project_id: str, update: ProjectUpdate | None = None, **fields: Any) -> dict[str, Any]:
+        if update is not None:
+            fields.update(update.model_dump())
+        allowed = {"name", "description", "goal", "interval_days", "enabled", "last_checked_at", "exclusions"}
         clean = {key: value for key, value in fields.items() if key in allowed}
         if not clean:
-            return
+            return self.get_project(project_id)
+        if "exclusions" in clean:
+            clean["exclusions_json"] = json.dumps(clean.pop("exclusions"))
         assignments = ",".join(f"{key}=?" for key in clean)
         with self.connect() as conn:
-            conn.execute(f"UPDATE projects SET {assignments} WHERE id=?", (*clean.values(), project_id))
+            cursor = conn.execute(f"UPDATE projects SET {assignments} WHERE id=?", (*clean.values(), project_id))
+            if cursor.rowcount == 0:
+                raise KeyError(project_id)
+        return self.get_project(project_id)
 
     def create_snapshot(self, project_id: str, fingerprint: str, manifest: list[dict], git: dict, analysis: dict, coverage: dict) -> str:
         snapshot_id = uuid.uuid4().hex
@@ -225,4 +232,3 @@ class Store:
         with self.connect() as conn:
             rows = conn.execute("SELECT lesson_id,status FROM lesson_progress WHERE review_id=?", (review_id,)).fetchall()
         return {row[0]: row[1] for row in rows}
-

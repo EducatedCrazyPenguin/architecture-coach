@@ -9,6 +9,8 @@ Architecture Coach is a private, local dashboard that turns your current project
 3. Double-click `Start Architecture Coach.cmd`.
 4. Add a local project folder in the browser and run its first review.
 
+Open **Settings** to change a project's learning goal, review interval, schedule status, or additional excluded paths. Each saved change applies to the next captured review.
+
 You can also use the command line:
 
 ```powershell
@@ -47,4 +49,3 @@ archcoach doctor
 ```
 
 The application is divided into capture, static analysis, Codex, review, diagram, persistence, worker, and web layers. JSON schemas under `src/archcoach/schemas` constrain Codex output.
-

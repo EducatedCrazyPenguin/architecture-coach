@@ -6,6 +6,7 @@
   <meta name="archcoach-token" content="{{ csrf_token }}">
   <title>{% block title %}Architecture Coach{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='/settings.css') }}">
   <script src="/vendor/htmx.min.js" defer></script>
   <script src="{{ url_for('static', path='/app.js') }}" defer></script>
 </head>
@@ -21,6 +22,7 @@
             <span><b>{{ item.name }}</b><small>{{ item.next_review }}</small></span>
           </a>
         {% endfor %}
+        <a class="nav-link {{ 'active' if page == 'settings' else '' }}" href="/settings">Settings</a>
       </nav>
       <form class="exit-form" method="post" action="/exit?token={{ csrf_token }}"><button class="quiet" type="submit">Exit app</button></form>
     </aside>

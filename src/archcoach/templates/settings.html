@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Settings · Architecture Coach{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div><p class="eyebrow">Settings</p><h1>Review on your terms</h1><p class="lede">Choose what each project is working toward, what Architecture Coach should skip, and how often it should check again.</p></div>
+</header>
+{% if saved %}<div class="notice success">Project settings saved. The next review will use the new goal and exclusions.</div>{% endif %}
+<section class="settings-status">
+  <article class="panel"><p class="eyebrow">Codex</p><h2>{{ 'Ready' if codex.authenticated else 'Needs attention' }}</h2><p>{{ codex.message }}</p><code>{{ codex.command }}</code></article>
+  <article class="panel"><p class="eyebrow">Local storage</p><h2>Private on this computer</h2><p>Review snapshots, lessons, and conversations are stored here:</p><code>{{ data_dir }}</code></article>
+</section>
+<section class="section-head"><div><p class="eyebrow">Projects</p><h2>Goals and schedule</h2></div></section>
+{% for item in projects %}
+<form class="settings-card" method="post" action="/projects/{{ item.id }}/settings?token={{ csrf_token }}">
+  <div class="settings-card-head"><div><h3>{{ item.name }}</h3><code>{{ item.path }}</code></div><label class="toggle"><input type="checkbox" name="enabled" {{ 'checked' if item.enabled }}> Include in weekly reviews</label></div>
+  <div class="settings-grid">
+    <label>Project name<input name="name" required maxlength="120" value="{{ item.name }}"></label>
+    <label>Review every <span>days</span><input name="interval_days" required type="number" min="1" max="365" value="{{ item.interval_days }}"></label>
+    <label class="wide">What this project does<textarea name="description" maxlength="2000" rows="2">{{ item.description }}</textarea></label>
+    <label class="wide">Current development goal<textarea name="goal" maxlength="2000" rows="2">{{ item.goal }}</textarea></label>
+    <label class="wide">Additional exclusions <span>one path or glob per line</span><textarea name="exclusions" rows="4" placeholder="reports/**&#10;scratch/">{{ item.exclusions|join('\n') }}</textarea></label>
+  </div>
+  <div class="settings-actions"><span class="muted">Next review: {{ item.next_review }}</span><button class="primary" type="submit">Save settings</button></div>
+</form>
+{% else %}
+<div class="empty-state compact"><h2>Add a project first</h2><p>Project-specific review settings will appear here.</p></div>
+{% endfor %}
+{% endblock %}

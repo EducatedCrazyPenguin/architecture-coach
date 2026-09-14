@@ -91,6 +91,33 @@ class ProjectCreate(BaseModel):
         return value
 
 
+class ProjectUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=2000)
+    goal: str = Field(default="", max_length=2000)
+    exclusions: list[str] = Field(default_factory=list, max_length=100)
+    interval_days: int = Field(default=7, ge=1, le=365)
+    enabled: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Project name is required")
+        return value
+
+    @field_validator("exclusions")
+    @classmethod
+    def clean_exclusions(cls, values: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for value in values:
+            item = value.strip().replace("\\", "/").lstrip("/")
+            if item and item not in cleaned:
+                cleaned.append(item)
+        return cleaned
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
 

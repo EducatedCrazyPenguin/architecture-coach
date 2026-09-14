@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 from .ai import CodexAdapter
 from .config import Settings
 from .db import Store
-from .models import ChatRequest, LessonStatusRequest, ProjectCreate
+from .models import ChatRequest, LessonStatusRequest, ProjectCreate, ProjectUpdate
 from .review import ReviewEngine, source_text
 from .worker import Worker
 
@@ -59,6 +59,14 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     def dashboard(request: Request):
         return templates.TemplateResponse(request=request, name="dashboard.html", context=context(request, page="projects", codex=codex.status()))
 
+    @app.get("/settings", response_class=HTMLResponse)
+    def settings_page(request: Request, saved: bool = False):
+        return templates.TemplateResponse(
+            request=request,
+            name="settings.html",
+            context=context(request, page="settings", codex=codex.status(), saved=saved, data_dir=settings.data_dir),
+        )
+
     @app.get("/projects/{project_id}", response_class=HTMLResponse)
     def project_page(project_id: str, request: Request):
         try: project = store.get_project(project_id)
@@ -90,6 +98,30 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         except KeyError: raise HTTPException(404)
         job_id = store.enqueue("review", project_id, priority=10)
         return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
+
+    @app.post("/projects/{project_id}/settings")
+    def update_project_settings(
+        project_id: str,
+        request: Request,
+        name: str = Form(),
+        description: str = Form(default=""),
+        goal: str = Form(default=""),
+        exclusions: str = Form(default=""),
+        interval_days: int = Form(default=7),
+        enabled: str | None = Form(default=None),
+    ):
+        require_local(request)
+        update = ProjectUpdate(
+            name=name,
+            description=description,
+            goal=goal,
+            exclusions=exclusions.splitlines(),
+            interval_days=interval_days,
+            enabled=enabled == "on",
+        )
+        try: store.update_project(project_id, update)
+        except KeyError: raise HTTPException(404)
+        return RedirectResponse(url="/settings?saved=true", status_code=303)
 
     @app.get("/jobs/{job_id}", response_class=HTMLResponse)
     def job_page(job_id: str, request: Request):
@@ -144,6 +176,17 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     @app.post("/api/projects", status_code=201)
     def api_add_project(data: ProjectCreate, request: Request): require_local(request); return store.add_project(data)
+
+    @app.get("/api/projects/{project_id}")
+    def api_project(project_id: str):
+        try: return store.get_project(project_id)
+        except KeyError: raise HTTPException(404)
+
+    @app.patch("/api/projects/{project_id}")
+    def api_update_project(project_id: str, data: ProjectUpdate, request: Request):
+        require_local(request)
+        try: return store.update_project(project_id, data)
+        except KeyError: raise HTTPException(404)
 
     @app.post("/api/projects/{project_id}/reviews", status_code=202)
     def api_review(project_id: str, request: Request): require_local(request); return {"job_id": store.enqueue("review", project_id)}
