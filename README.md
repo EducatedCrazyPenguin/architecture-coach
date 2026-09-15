@@ -7,7 +7,7 @@ Architecture Coach is a private, local dashboard that turns your current project
 1. Double-click `install.cmd` once. It creates an isolated `.venv`, installs the pinned Python dependencies from `requirements.lock`, and installs the locked browser packages.
 2. Make sure `codex login status` succeeds in a normal terminal. Run `codex login` if needed.
 3. Double-click `Start Architecture Coach.cmd`.
-4. Add a local project folder in the browser and run its first review.
+4. Add a local project folder in the browser and run its first review. In File Explorer, open the project, click the address bar, and copy a path such as `C:\Users\you\Documents\my-project`. A GitHub URL is not a local folder; clone or download that repository first.
 
 Open **Settings** to change a project's learning goal, review interval, schedule status, or additional excluded paths. Each saved change applies to the next captured review.
 
@@ -42,6 +42,7 @@ Archify is vendored at commit `a07fa1d5b2a10cbea110c5a2be2817397a301cdc` under `
 ## Recovery and maintenance
 
 - **Codex login:** run `codex login status`, then `codex login` if the saved session expired. Use **Settings → Refresh diagnostics** before retrying a failed review.
+- **Git inspection:** Architecture Coach checks Git ignore rules before capture. It discovers Git from PATH, normal Git for Windows locations, and Codex's bundled runtime. If none is available for a Git repository, install Git for Windows and restart the app.
 - **Usage limits and timeouts:** the app pauses scheduled retries after these failures. Retry manually after the limit resets, or adjust the per-call and per-review limits in Settings.
 - **Interrupted work:** reopening the launcher marks work abandoned by the prior owning worker and queues one catch-up review when a project is overdue. Completed reviews remain available after a failed attempt.
 - **Database migration:** startup applies transactional migrations automatically. Before changing an existing database, it copies the prior file to `%LOCALAPPDATA%\ArchCoach\backups`.

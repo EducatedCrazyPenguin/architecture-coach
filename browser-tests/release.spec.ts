@@ -64,14 +64,25 @@ test.afterAll(async () => {
       new Promise<void>(resolveWait => setTimeout(resolveWait, 5_000)),
     ]);
   }
-  if (server && server.exitCode === null) server.kill();
-  rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  if (server && server.exitCode === null) {
+    server.kill();
+    await Promise.race([
+      new Promise<void>(resolveExit => server.once("exit", () => resolveExit())),
+      new Promise<void>(resolveWait => setTimeout(resolveWait, 5_000)),
+    ]);
+  }
+  try {
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch {
+    // Edge can briefly retain a generated HTML handle while its context closes.
+    // The directory contains synthetic fixtures only and the OS temp cleaner can remove it later.
+  }
 });
 
 test("project review, lesson, chat, settings, and comparison use saved evidence", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Add a project" }).first().click();
-  await page.getByLabel("Folder path").fill(projectDir);
+  await page.getByLabel("Local project folder").fill(projectDir);
   await page.getByLabel("Project name").fill("Browser fixture");
   await page.getByLabel("What does it do?").fill("Exercises the browser acceptance flow.");
   await page.getByRole("button", { name: "Add project" }).click();
@@ -114,7 +125,7 @@ test("a running review can be cancelled without publishing a review", async ({ p
   await configureFakeCodex(page);
   await page.goto("/");
   await page.getByRole("button", { name: "Add a project" }).first().click();
-  await page.getByLabel("Folder path").fill(stalledDir);
+  await page.getByLabel("Local project folder").fill(stalledDir);
   await page.getByLabel("Project name").fill("Cancellation fixture");
   await page.getByRole("button", { name: "Add project" }).click();
   await page.getByRole("button", { name: "Review current files" }).click();
@@ -133,7 +144,7 @@ test("malformed AI output leaves an explicit limited review", async ({ page }) =
   await configureFakeCodex(page);
   await page.goto("/");
   await page.getByRole("button", { name: "Add a project" }).first().click();
-  await page.getByLabel("Folder path").fill(invalidDir);
+  await page.getByLabel("Local project folder").fill(invalidDir);
   await page.getByLabel("Project name").fill("Invalid output fixture");
   await page.getByRole("button", { name: "Add project" }).click();
   await page.getByRole("button", { name: "Review current files" }).click();

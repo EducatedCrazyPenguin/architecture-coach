@@ -4,6 +4,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -38,10 +39,39 @@ class CaptureCancelled(CaptureError):
     pass
 
 
-def _run_git(root: Path, args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+def find_git() -> str | None:
+    """Find Git from PATH, a normal Windows install, or Codex's bundled runtime."""
+    discovered = shutil.which("git")
+    if discovered:
+        return discovered
+    if os.name != "nt":
+        return None
+    candidates: list[Path] = []
+    for variable in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
+        base = os.environ.get(variable)
+        if not base:
+            continue
+        base_path = Path(base)
+        candidates.extend((base_path / "Git" / "cmd" / "git.exe", base_path / "Programs" / "Git" / "cmd" / "git.exe"))
+    profile = Path(os.environ.get("USERPROFILE") or Path.home())
+    runtime_root = profile / ".cache" / "codex-runtimes"
+    try:
+        candidates.extend(sorted(runtime_root.glob("*/dependencies/native/git/cmd/git.exe"), reverse=True))
+    except OSError:
+        pass
+    return next((str(candidate) for candidate in candidates if candidate.is_file()), None)
+
+
+def _run_git(root: Path, args: list[str], *, input_text: str | None = None, executable: str | None = None) -> subprocess.CompletedProcess[str]:
+    executable = executable or find_git()
+    if not executable:
+        raise CaptureError(
+            "Git is required to inspect this repository and respect its ignored files. "
+            "Install Git for Windows, then restart Architecture Coach."
+        )
     try:
         return subprocess.run(
-            ["git", "-C", str(root), *args], input=input_text, capture_output=True,
+            [executable, "-C", str(root), *args], input=input_text, capture_output=True,
             text=True, timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -49,16 +79,28 @@ def _run_git(root: Path, args: list[str], *, input_text: str | None = None) -> s
 
 
 def git_context(root: Path) -> dict:
-    probe = _run_git(root, ["rev-parse", "--is-inside-work-tree"])
+    executable = find_git()
+    if not executable:
+        likely_repository = any((candidate / ".git").exists() for candidate in (root, *root.parents))
+        if likely_repository:
+            raise CaptureError(
+                "Git is required to inspect this repository and respect its ignored files. "
+                "Install Git for Windows, then restart Architecture Coach."
+            )
+        return {
+            "is_git": False, "branch": None, "commit": None, "dirty": None,
+            "detached": False, "worktree_root": None,
+        }
+    probe = _run_git(root, ["rev-parse", "--is-inside-work-tree"], executable=executable)
     if probe.returncode != 0 or probe.stdout.strip() != "true":
         return {
             "is_git": False, "branch": None, "commit": None, "dirty": None,
             "detached": False, "worktree_root": None,
         }
-    top = _run_git(root, ["rev-parse", "--show-toplevel"])
-    branch = _run_git(root, ["symbolic-ref", "--quiet", "--short", "HEAD"])
-    commit = _run_git(root, ["rev-parse", "HEAD"])
-    dirty = _run_git(root, ["status", "--porcelain", "--untracked-files=normal"])
+    top = _run_git(root, ["rev-parse", "--show-toplevel"], executable=executable)
+    branch = _run_git(root, ["symbolic-ref", "--quiet", "--short", "HEAD"], executable=executable)
+    commit = _run_git(root, ["rev-parse", "HEAD"], executable=executable)
+    dirty = _run_git(root, ["status", "--porcelain", "--untracked-files=normal"], executable=executable)
     if top.returncode or dirty.returncode:
         detail = (top.stderr or dirty.stderr).strip()
         raise CaptureError(f"Git metadata could not be read safely: {detail or 'unknown Git error'}")

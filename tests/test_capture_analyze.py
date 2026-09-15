@@ -1,7 +1,10 @@
+import os
 from pathlib import Path
 
+import pytest
+
 from archcoach.analyze import analyze_snapshot
-from archcoach.capture import capture_project, fingerprint_project, git_context, read_blob
+from archcoach.capture import CaptureError, capture_project, find_git, fingerprint_project, git_context, read_blob
 from archcoach.config import Settings
 
 
@@ -87,6 +90,38 @@ def test_git_worktree_is_detected_without_git_directory(tmp_path: Path):
     assert context["is_git"] is True
     assert context["branch"] == "fixture-worktree"
     assert context["detached"] is False
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Codex bundled Git discovery is Windows-specific")
+def test_find_git_uses_codex_bundled_runtime_when_path_is_missing(tmp_path: Path, monkeypatch):
+    import archcoach.capture as capture_module
+
+    bundled = tmp_path / ".cache" / "codex-runtimes" / "runtime" / "dependencies" / "native" / "git" / "cmd" / "git.exe"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_bytes(b"fixture")
+    monkeypatch.setattr(capture_module.shutil, "which", lambda _name: None)
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.delenv("ProgramFiles", raising=False)
+    monkeypatch.delenv("ProgramFiles(x86)", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+
+    assert find_git() == str(bundled)
+
+
+def test_missing_git_has_actionable_error_only_for_repository(tmp_path: Path, monkeypatch):
+    import archcoach.capture as capture_module
+
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    (repository / ".git").mkdir()
+    monkeypatch.setattr(capture_module, "find_git", lambda: None)
+
+    with pytest.raises(CaptureError, match="Install Git for Windows"):
+        git_context(repository)
+
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert git_context(plain)["is_git"] is False
 
 
 def test_capture_retries_the_whole_inventory_and_marks_persistent_edits(tmp_path: Path, monkeypatch):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -126,8 +127,15 @@ class ProjectCreate(BaseModel):
     @field_validator("path")
     @classmethod
     def path_not_blank(cls, value: str) -> str:
-        if not value.strip():
+        value = value.strip()
+        if not value:
             raise ValueError("Project path is required")
+        parsed = urlparse(value)
+        if parsed.scheme.lower() in {"http", "https", "git", "ssh"} or value.lower().startswith("git@"):
+            raise ValueError(
+                "Architecture Coach reviews a local folder already on this computer. "
+                "Clone or download the repository first, then paste its Windows folder path."
+            )
         return value
 
 

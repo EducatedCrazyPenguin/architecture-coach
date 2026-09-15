@@ -21,13 +21,14 @@
   {% endfor %}
 </div>
 {% else %}
-<div class="empty-state"><div class="empty-mark">⌘</div><h2>Add your first project</h2><p>Choose any local folder. Architecture Coach reads source files safely and stores its reports separately.</p><button class="primary" data-dialog="add-project">Choose a folder path</button></div>
+<div class="empty-state"><div class="empty-mark">⌘</div><h2>Add your first project</h2><p>Choose a project folder already saved on this computer. Architecture Coach reads its source safely and stores reports separately.</p><button class="primary" data-dialog="add-project">Enter a local folder</button></div>
 {% endif %}
 
 <dialog id="add-project">
   <form method="post" action="/projects"><input type="hidden" name="_csrf" value="{{ csrf_token }}">
     <div class="dialog-head"><div><p class="eyebrow">New project</p><h2>What should we review?</h2></div><button type="button" class="icon-button" data-close>×</button></div>
-    <label>Folder path<input name="path" required placeholder="C:\Users\you\Documents\my-project"></label>
+    <label>Local project folder<input name="path" required placeholder="C:\Users\you\Documents\my-project"><span class="field-help">Paste a Windows folder path. GitHub web addresses are not downloaded or searched.</span></label>
+    <details class="folder-help"><summary>How do I find the folder path?</summary><ol><li>Open the project in File Explorer.</li><li>Click the address bar at the top.</li><li>Copy the full path and paste it above.</li></ol><p>If the project only exists on GitHub, clone or download it first.</p></details>
     <label>Project name <span>optional</span><input name="name" placeholder="Uses the folder name by default"></label>
     <label>What does it do? <span>optional</span><textarea name="description" rows="3"></textarea></label>
     <label>What are you building next? <span>optional</span><textarea name="goal" rows="2"></textarea></label>

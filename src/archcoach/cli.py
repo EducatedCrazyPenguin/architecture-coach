@@ -15,6 +15,7 @@ import uvicorn
 
 from .ai import CodexAdapter
 from .app import create_app
+from .capture import find_git
 from .config import Settings, merge_saved_settings
 from .db import Store
 from .models import ProjectCreate
@@ -46,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv); settings = Settings.load(args.data_dir); settings.ensure_dirs(); store = Store(settings.db_path)
     settings = merge_saved_settings(settings, store.get_app_settings())
     if args.command == "doctor":
-        codex = CodexAdapter(settings); checks = {"data_directory": str(settings.data_dir), "data_writable": settings.data_dir.exists(), "codex": codex.status(), "node": find_node(), "archify": settings.archify_cli.exists(), "htmx": (settings.app_dir.parent.parent / "node_modules" / "htmx.org" / "dist" / "htmx.min.js").exists()}
+        codex = CodexAdapter(settings); checks = {"data_directory": str(settings.data_dir), "data_writable": settings.data_dir.exists(), "codex": codex.status(), "git": find_git(), "node": find_node(), "archify": settings.archify_cli.exists(), "htmx": (settings.app_dir.parent.parent / "node_modules" / "htmx.org" / "dist" / "htmx.min.js").exists()}
         print(json.dumps(checks, indent=2))
         required = checks["data_writable"] and checks["node"] and checks["archify"] and checks["htmx"]
         return 0 if required else 1

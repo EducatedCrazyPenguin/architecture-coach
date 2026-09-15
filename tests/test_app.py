@@ -25,6 +25,21 @@ def test_dashboard_and_project_api(tmp_path: Path):
     assert client.get("/api/projects").json()[0]["path"] == str(project.resolve())
 
 
+def test_github_url_is_explained_as_a_local_folder_requirement(tmp_path: Path):
+    app, client = make_client(tmp_path)
+    token = app.state.csrf_token
+
+    page = client.post(
+        "/projects",
+        data={"_csrf": token, "path": "https://github.com/example/project"},
+    )
+
+    assert page.status_code == 200
+    assert "reviews a local folder already on this computer" in page.text
+    assert "How do I find the folder path?" in page.text
+    assert str(Path.cwd()) not in page.text
+
+
 def test_source_view_escapes_snapshot_content(tmp_path: Path):
     project = tmp_path / "project"; project.mkdir(); (project / "bad.html").write_text("<script>alert(1)</script>", encoding="utf-8")
     app, client = make_client(tmp_path); token = app.state.csrf_token

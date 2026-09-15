@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from pydantic import ValidationError
@@ -164,7 +165,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     def add_project(request: Request, path: str = Form(), name: str = Form(default=""), description: str = Form(default=""), goal: str = Form(default=""), csrf: str = Form(alias="_csrf")):
         require_local(request, csrf)
         try: project = store.add_project(ProjectCreate(path=path, name=name or None, description=description, goal=goal))
-        except ValueError as exc: return RedirectResponse(url=f"/?error={str(exc)}", status_code=303)
+        except ValueError as exc: return RedirectResponse(url="/?" + urlencode({"error": str(exc)}), status_code=303)
         return RedirectResponse(url=f"/projects/{project['id']}", status_code=303)
 
     @app.post("/projects/{project_id}/review")
