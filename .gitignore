@@ -9,3 +9,5 @@ build/
 .coverage
 .test-data/
 .acceptance-data/
+test-results/
+playwright-report/
