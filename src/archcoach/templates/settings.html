@@ -9,9 +9,23 @@
   <article class="panel"><p class="eyebrow">Codex</p><h2>{{ 'Ready' if codex.authenticated else 'Needs attention' }}</h2><p>{{ codex.message }}</p><code>{{ codex.command }}</code></article>
   <article class="panel"><p class="eyebrow">Local storage</p><h2>Private on this computer</h2><p>Review snapshots, lessons, and conversations are stored here:</p><code>{{ data_dir }}</code></article>
 </section>
+<section class="section-head"><div><p class="eyebrow">Analysis</p><h2>Codex and review limits</h2></div><a class="secondary button-link" href="/settings?refresh=true">Refresh diagnostics</a></section>
+<form class="settings-card" method="post" action="/settings/application">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+  <div class="settings-grid">
+    <label class="wide">Codex executable<input name="codex_command" required value="{{ app_settings.codex_command }}"></label>
+    <label>Model <span>blank uses Codex default</span><input name="codex_model" value="{{ app_settings.codex_model or '' }}"></label>
+    <label>Reasoning effort<select name="reasoning_effort"><option value="low" {{ 'selected' if app_settings.reasoning_effort == 'low' }}>Low</option><option value="medium" {{ 'selected' if app_settings.reasoning_effort == 'medium' }}>Medium</option><option value="high" {{ 'selected' if app_settings.reasoning_effort == 'high' }}>High</option><option value="xhigh" {{ 'selected' if app_settings.reasoning_effort == 'xhigh' }}>Extra high</option></select></label>
+    <label>Seconds per Codex call<input type="number" min="30" max="1800" name="codex_call_timeout" value="{{ app_settings.codex_call_timeout }}"></label>
+    <label>Seconds per review<input type="number" min="60" max="3600" name="review_timeout" value="{{ app_settings.review_timeout }}"></label>
+    <label>Characters per source packet<input type="number" min="8000" max="96000" name="source_packet_chars" value="{{ app_settings.source_packet_chars }}"></label>
+    <label>Source packets<input type="number" min="1" max="6" name="source_packet_limit" value="{{ app_settings.source_packet_limit }}"></label>
+  </div>
+  <div class="settings-actions"><span class="muted">Changes apply to new jobs.</span><button class="primary" type="submit">Save analysis settings</button></div>
+</form>
 <section class="section-head"><div><p class="eyebrow">Projects</p><h2>Goals and schedule</h2></div></section>
 {% for item in projects %}
-<form class="settings-card" method="post" action="/projects/{{ item.id }}/settings?token={{ csrf_token }}">
+<form class="settings-card" method="post" action="/projects/{{ item.id }}/settings"><input type="hidden" name="_csrf" value="{{ csrf_token }}">
   <div class="settings-card-head"><div><h3>{{ item.name }}</h3><code>{{ item.path }}</code></div><label class="toggle"><input type="checkbox" name="enabled" {{ 'checked' if item.enabled }}> Include in weekly reviews</label></div>
   <div class="settings-grid">
     <label>Project name<input name="name" required maxlength="120" value="{{ item.name }}"></label>
@@ -20,7 +34,7 @@
     <label class="wide">Current development goal<textarea name="goal" maxlength="2000" rows="2">{{ item.goal }}</textarea></label>
     <label class="wide">Additional exclusions <span>one path or glob per line</span><textarea name="exclusions" rows="4" placeholder="reports/**&#10;scratch/">{{ item.exclusions|join('\n') }}</textarea></label>
   </div>
-  <div class="settings-actions"><span class="muted">Next review: {{ item.next_review }}</span><button class="primary" type="submit">Save settings</button></div>
+  <div class="settings-actions"><span class="muted">{% if item.schedule_state == 'paused' %}Schedule paused after {{ item.schedule_error }}. Run a manual review to retry.{% elif item.schedule_state == 'disabled' %}Weekly reviews are disabled.{% else %}Next review: {{ item.next_review }}{% endif %}</span><button class="primary" type="submit">Save settings</button></div>
 </form>
 {% else %}
 <div class="empty-state compact"><h2>Add a project first</h2><p>Project-specific review settings will appear here.</p></div>

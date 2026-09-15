@@ -16,7 +16,7 @@
   <a class="project-card" href="/projects/{{ item.id }}">
     <div class="card-top"><span class="folder-icon">⌁</span><span class="pill subtle">{{ item.interval_days }} day cycle</span></div>
     <h3>{{ item.name }}</h3><p>{{ item.description or 'Add a description to help the coach understand this project.' }}</p>
-    <div class="card-meta"><span>{{ 'Reviewed' if item.latest_review else 'Waiting for first review' }}</span><b>{{ item.next_review }}</b></div>
+    <div class="card-meta"><span>{{ 'Reviewed' if item.latest_review else 'Waiting for first review' }}</span><b>{% if item.schedule_state == 'paused' %}Schedule paused after {{ item.schedule_error }}{% elif item.schedule_state == 'disabled' %}Weekly reviews disabled{% else %}{{ item.next_review }}{% endif %}</b></div>
   </a>
   {% endfor %}
 </div>
@@ -25,7 +25,7 @@
 {% endif %}
 
 <dialog id="add-project">
-  <form method="post" action="/projects?token={{ csrf_token }}">
+  <form method="post" action="/projects"><input type="hidden" name="_csrf" value="{{ csrf_token }}">
     <div class="dialog-head"><div><p class="eyebrow">New project</p><h2>What should we review?</h2></div><button type="button" class="icon-button" data-close>×</button></div>
     <label>Folder path<input name="path" required placeholder="C:\Users\you\Documents\my-project"></label>
     <label>Project name <span>optional</span><input name="name" placeholder="Uses the folder name by default"></label>
@@ -35,4 +35,3 @@
   </form>
 </dialog>
 {% endblock %}
-

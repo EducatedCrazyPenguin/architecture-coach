@@ -132,16 +132,18 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectUpdate(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-    description: str = Field(default="", max_length=2000)
-    goal: str = Field(default="", max_length=2000)
-    exclusions: list[str] = Field(default_factory=list, max_length=100)
-    interval_days: int = Field(default=7, ge=1, le=365)
-    enabled: bool = True
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
+    goal: str | None = Field(default=None, max_length=2000)
+    exclusions: list[str] | None = Field(default=None, max_length=100)
+    interval_days: int | None = Field(default=None, ge=1, le=365)
+    enabled: bool | None = None
 
     @field_validator("name")
     @classmethod
     def name_not_blank(cls, value: str) -> str:
+        if value is None:
+            return value
         value = value.strip()
         if not value:
             raise ValueError("Project name is required")
@@ -149,13 +151,25 @@ class ProjectUpdate(BaseModel):
 
     @field_validator("exclusions")
     @classmethod
-    def clean_exclusions(cls, values: list[str]) -> list[str]:
+    def clean_exclusions(cls, values: list[str] | None) -> list[str] | None:
+        if values is None:
+            return None
         cleaned: list[str] = []
         for value in values:
             item = value.strip().replace("\\", "/").lstrip("/")
             if item and item not in cleaned:
                 cleaned.append(item)
         return cleaned
+
+
+class AppSettingsUpdate(BaseModel):
+    codex_command: str | None = Field(default=None, min_length=1, max_length=500)
+    codex_model: str | None = Field(default=None, max_length=120)
+    reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None
+    codex_call_timeout: int | None = Field(default=None, ge=30, le=1800)
+    review_timeout: int | None = Field(default=None, ge=60, le=3600)
+    source_packet_chars: int | None = Field(default=None, ge=8000, le=96000)
+    source_packet_limit: int | None = Field(default=None, ge=1, le=6)
 
 
 class ChatRequest(BaseModel):

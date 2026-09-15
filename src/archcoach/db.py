@@ -211,12 +211,12 @@ class Store:
 
     def update_project(self, project_id: str, update: ProjectUpdate | None = None, **fields: Any) -> dict[str, Any]:
         if update is not None:
-            fields.update(update.model_dump())
+            fields.update(update.model_dump(exclude_unset=True))
         allowed = {
             "name", "description", "goal", "interval_days", "enabled", "last_checked_at",
             "last_attempted_at", "schedule_error", "exclusions",
         }
-        clean = {key: value for key, value in fields.items() if key in allowed}
+        clean = {key: value for key, value in fields.items() if key in allowed and value is not None}
         if not clean:
             return self.get_project(project_id)
         if "exclusions" in clean:
@@ -508,7 +508,32 @@ class Store:
         result = self._row(row)
         if not result:
             raise KeyError(job_id)
+        start = result.get("started_at") or result["created_at"]
+        end = result.get("finished_at") or utc_now()
+        try:
+            result["elapsed_seconds"] = max(0, int((datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds()))
+        except (ValueError, TypeError):
+            result["elapsed_seconds"] = None
+        result["cancellation_state"] = (
+            "cancelled" if result["status"] == "cancelled" else
+            "requested" if result["cancel_requested"] else "none"
+        )
         return result
+
+    def get_app_settings(self) -> dict[str, Any]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT key,value_json FROM settings ORDER BY key").fetchall()
+        return {row["key"]: json.loads(row["value_json"]) for row in rows}
+
+    def update_app_settings(self, values: dict[str, Any]) -> dict[str, Any]:
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            for key, value in values.items():
+                conn.execute(
+                    "INSERT INTO settings(key,value_json) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json",
+                    (key, json.dumps(value)),
+                )
+        return self.get_app_settings()
 
     def add_message(
         self,

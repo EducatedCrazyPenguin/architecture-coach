@@ -25,7 +25,7 @@
         {% endfor %}
         <a class="nav-link {{ 'active' if page == 'settings' else '' }}" href="/settings">Settings</a>
       </nav>
-      <form class="exit-form" method="post" action="/exit?token={{ csrf_token }}"><button class="quiet" type="submit">Exit app</button></form>
+      <form class="exit-form" method="post" action="/exit"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><button class="quiet" type="submit">Exit app</button></form>
     </aside>
     <main class="content">{% block content %}{% endblock %}</main>
   </div>

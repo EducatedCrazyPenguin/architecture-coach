@@ -2,7 +2,7 @@
 
 Starting commit: `f324046e8f7fc30e42b4a964446302b0103b9268`
 
-Verified: **28/40** · Implemented awaiting checks: **0** · In progress: **0** · Blocked: **0** · Remaining: **12**
+Verified: **32/40** · Implemented awaiting checks: **0** · In progress: **0** · Blocked: **0** · Remaining: **8**
 
 ## Phase A
 
@@ -55,10 +55,10 @@ Verified: **28/40** · Implemented awaiting checks: **0** · In progress: **0** 
 
 ## Phase H
 
-- [ ] **H1** Apply global request protection — `todo`
-- [ ] **H2** Unify validation and settings — `todo`
-- [ ] **H3** Keep saved reviews responsive — `todo`
-- [ ] **H4** Finish review reading and progress states — `todo`
+- [x] **H1** Apply global request protection — `verified`
+- [x] **H2** Unify validation and settings — `verified`
+- [x] **H3** Keep saved reviews responsive — `verified`
+- [x] **H4** Finish review reading and progress states — `verified`
 
 ## Phase I
 

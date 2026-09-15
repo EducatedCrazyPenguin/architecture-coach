@@ -4,11 +4,14 @@ import html
 import json
 import secrets
 import threading
+import time
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
+from pydantic import ValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -16,14 +19,20 @@ from fastapi.templating import Jinja2Templates
 from .ai import CodexAdapter
 from .config import Settings
 from .db import Store
-from .models import ChatRequest, LessonStatusRequest, ProjectCreate, ProjectUpdate
+from .models import AppSettingsUpdate, ChatRequest, LessonStatusRequest, ProjectCreate, ProjectUpdate
+from .capture import CaptureError, fingerprint_project
 from .review import ReviewEngine, compare_saved_reviews, source_text, validate_comparison_records
 from .worker import Worker
 
 
 def create_app(settings: Settings | None = None, start_worker: bool = True) -> FastAPI:
     settings = settings or Settings.load(); settings.ensure_dirs()
-    store = Store(settings.db_path); codex = CodexAdapter(settings); engine = ReviewEngine(settings, store, codex); worker = Worker(store, engine)
+    store = Store(settings.db_path)
+    saved_settings = store.get_app_settings()
+    allowed_setting_keys = set(AppSettingsUpdate.model_fields)
+    settings = replace(settings, **{key: value for key, value in saved_settings.items() if key in allowed_setting_keys})
+    settings.ensure_dirs()
+    codex = CodexAdapter(settings); engine = ReviewEngine(settings, store, codex); worker = Worker(store, engine)
     templates = Jinja2Templates(directory=str(settings.app_dir / "templates"))
 
     @asynccontextmanager
@@ -34,6 +43,36 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     app = FastAPI(title="Architecture Coach", lifespan=lifespan)
     app.state.settings = settings; app.state.store = store; app.state.worker = worker; app.state.shutdown_event = threading.Event(); app.state.csrf_token = secrets.token_urlsafe(24)
+    diagnostics_lock = threading.Lock()
+    diagnostics_cache: dict = {"at": 0.0, "value": None}
+
+    def codex_status(refresh: bool = False) -> dict:
+        with diagnostics_lock:
+            if refresh or diagnostics_cache["value"] is None or time.monotonic() - diagnostics_cache["at"] > 30:
+                diagnostics_cache["value"] = codex.status()
+                diagnostics_cache["at"] = time.monotonic()
+            return diagnostics_cache["value"]
+
+    allowed_hosts = {
+        f"127.0.0.1:{settings.port}", f"localhost:{settings.port}", f"[::1]:{settings.port}",
+    }
+    if not start_worker:
+        allowed_hosts.add("testserver")
+
+    @app.middleware("http")
+    async def protect_local_origin(request: Request, call_next):
+        client = request.client.host if request.client else ""
+        allowed_clients = {"127.0.0.1", "::1"} | ({"testclient"} if not start_worker else set())
+        if client not in allowed_clients:
+            return JSONResponse({"detail": "Local access only"}, status_code=403)
+        host = request.headers.get("host", "").lower()
+        if host not in allowed_hosts:
+            return JSONResponse({"detail": "Invalid Host header"}, status_code=400)
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            origin = request.headers.get("origin")
+            if origin and origin.lower() not in {f"http://{value}" for value in allowed_hosts}:
+                return JSONResponse({"detail": "Cross-site mutation rejected"}, status_code=403)
+        return await call_next(request)
     app.mount("/static", StaticFiles(directory=str(settings.app_dir / "static")), name="static")
     htmx_dir = settings.app_dir.parent.parent / "node_modules" / "htmx.org" / "dist"
     if htmx_dir.exists():
@@ -46,25 +85,27 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             if project["last_checked_at"]:
                 project["next_review"] = (datetime.fromisoformat(project["last_checked_at"]) + timedelta(days=project["interval_days"])).strftime("%d %b %Y")
             else: project["next_review"] = "Due now"
+            project["schedule_state"] = (
+                "disabled" if not project["enabled"] else
+                "paused" if project.get("schedule_error") else "active"
+            )
         return {"request": request, "projects": projects, "csrf_token": app.state.csrf_token, **extra}
 
-    def require_local(request: Request):
-        host = request.client.host if request.client else ""
-        if host not in {"127.0.0.1", "::1", "testclient"}: raise HTTPException(403, "Local access only")
-        if request.method not in {"GET", "HEAD"}:
-            token = request.headers.get("x-archcoach-token") or request.query_params.get("token")
-            if token != app.state.csrf_token: raise HTTPException(403, "Invalid local request token")
+    def require_local(request: Request, form_token: str | None = None):
+        token = request.headers.get("x-archcoach-token") or form_token
+        if token != app.state.csrf_token:
+            raise HTTPException(403, "Invalid local request token")
 
     @app.get("/", response_class=HTMLResponse)
     def dashboard(request: Request):
-        return templates.TemplateResponse(request=request, name="dashboard.html", context=context(request, page="projects", codex=codex.status()))
+        return templates.TemplateResponse(request=request, name="dashboard.html", context=context(request, page="projects", codex=codex_status()))
 
     @app.get("/settings", response_class=HTMLResponse)
-    def settings_page(request: Request, saved: bool = False):
+    def settings_page(request: Request, saved: bool = False, refresh: bool = False):
         return templates.TemplateResponse(
             request=request,
             name="settings.html",
-            context=context(request, page="settings", codex=codex.status(), saved=saved, data_dir=settings.data_dir),
+            context=context(request, page="settings", codex=codex_status(refresh), saved=saved, data_dir=settings.data_dir, app_settings=settings),
         )
 
     @app.get("/projects/{project_id}", response_class=HTMLResponse)
@@ -80,9 +121,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             review = store.get_review(review_id); project = store.get_project(review["project_id"]); snapshot = store.get_snapshot(review["snapshot_id"])
         except KeyError: raise HTTPException(404)
         conversation = store.conversation_for_review(review_id)
-        current = __import__("archcoach.capture", fromlist=["capture_project"]).capture_project(settings, project)
-        stale = current["fingerprint"] != snapshot["fingerprint"]
-        return templates.TemplateResponse(request=request, name="review.html", context=context(request, page="review", project=project, review=review, snapshot=snapshot, lesson_statuses=store.lesson_statuses(review_id), conversation=conversation, stale=stale))
+        return templates.TemplateResponse(request=request, name="review.html", context=context(request, page="review", project=project, review=review, snapshot=snapshot, lesson_statuses=store.lesson_statuses(review_id), conversation=conversation, current_status="checking"))
 
     def comparison(project_id: str, before_id: str | None, after_id: str | None):
         project = store.get_project(project_id)
@@ -108,18 +147,18 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return templates.TemplateResponse(request=request, name="compare.html", context=context(request, page="compare", project=project, reviews=reviews, before=before_review, after=after_review, changes=changes))
 
     @app.post("/projects")
-    def add_project(request: Request, path: str = Form(), name: str = Form(default=""), description: str = Form(default=""), goal: str = Form(default="")):
-        require_local(request)
+    def add_project(request: Request, path: str = Form(), name: str = Form(default=""), description: str = Form(default=""), goal: str = Form(default=""), csrf: str = Form(alias="_csrf")):
+        require_local(request, csrf)
         try: project = store.add_project(ProjectCreate(path=path, name=name or None, description=description, goal=goal))
         except ValueError as exc: return RedirectResponse(url=f"/?error={str(exc)}", status_code=303)
         return RedirectResponse(url=f"/projects/{project['id']}", status_code=303)
 
     @app.post("/projects/{project_id}/review")
-    def start_review(project_id: str, request: Request):
-        require_local(request)
+    def start_review(project_id: str, request: Request, csrf: str = Form(alias="_csrf"), force: bool = Form(default=False)):
+        require_local(request, csrf)
         try: store.get_project(project_id)
         except KeyError: raise HTTPException(404)
-        job_id = store.enqueue("review", project_id, priority=10)
+        job_id = store.enqueue("review", project_id, {"force": force}, priority=10)
         return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
 
     @app.post("/projects/{project_id}/settings")
@@ -132,16 +171,17 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         exclusions: str = Form(default=""),
         interval_days: int = Form(default=7),
         enabled: str | None = Form(default=None),
+        csrf: str = Form(alias="_csrf"),
     ):
-        require_local(request)
-        update = ProjectUpdate(
-            name=name,
-            description=description,
-            goal=goal,
-            exclusions=exclusions.splitlines(),
-            interval_days=interval_days,
-            enabled=enabled == "on",
-        )
+        require_local(request, csrf)
+        try:
+            update = ProjectUpdate(
+                name=name, description=description, goal=goal,
+                exclusions=exclusions.splitlines(), interval_days=interval_days,
+                enabled=enabled == "on",
+            )
+        except ValidationError as exc:
+            raise HTTPException(422, str(exc)) from exc
         try: store.update_project(project_id, update)
         except KeyError: raise HTTPException(404)
         return RedirectResponse(url="/settings?saved=true", status_code=303)
@@ -155,8 +195,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return templates.TemplateResponse(request=request, name="job.html", context=context(request, page="job", job=job))
 
     @app.post("/jobs/{job_id}/cancel")
-    def cancel_job(job_id: str, request: Request):
-        require_local(request)
+    def cancel_job(job_id: str, request: Request, csrf: str = Form(alias="_csrf")):
+        require_local(request, csrf)
         try: job = store.get_job(job_id)
         except KeyError: raise HTTPException(404)
         updated = store.request_cancel(job_id)
@@ -165,8 +205,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
 
     @app.post("/reviews/{review_id}/chat")
-    def chat(review_id: str, request: Request, message: str = Form()):
-        require_local(request)
+    def chat(review_id: str, request: Request, message: str = Form(), csrf: str = Form(alias="_csrf")):
+        require_local(request, csrf)
         try: store.get_review(review_id)
         except KeyError: raise HTTPException(404)
         job_id = store.enqueue("chat", None, {"message": message}, review_id=review_id, priority=1)
@@ -174,31 +214,52 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     @app.post("/reviews/{review_id}/lessons/{lesson_id}")
     async def lesson_status(review_id: str, lesson_id: str, request: Request):
-        require_local(request); data = LessonStatusRequest.model_validate(await request.json())
+        require_local(request)
+        try:
+            review = store.get_review(review_id)
+        except KeyError:
+            raise HTTPException(404, "Review not found")
+        known_lessons = {item.get("id") for item in review.get("critique", {}).get("lessons", [])}
+        if lesson_id not in known_lessons:
+            raise HTTPException(404, "Lesson not found in this review")
+        data = LessonStatusRequest.model_validate(await request.json())
         store.set_lesson_status(review_id, lesson_id, data.status)
         return {"ok": True}
 
     @app.get("/reviews/{review_id}/source")
     def evidence_source(review_id: str, path: str, line: int = 1):
         try:
-            review = store.get_review(review_id); snapshot = store.get_snapshot(review["snapshot_id"]); content = source_text(settings, snapshot, path)
+            review = store.get_review(review_id); snapshot = store.get_snapshot(review["snapshot_id"]); content = source_text(app.state.settings, snapshot, path)
         except KeyError: raise HTTPException(404)
         numbered = "\n".join(f'<span id="L{i}" class="source-line{' selected' if i == line else ''}"><b>{i:5}</b>  {html.escape(text)}</span>' for i, text in enumerate(content.splitlines(), 1))
         return HTMLResponse(f"<!doctype html><title>{html.escape(path)}</title><style>body{{font:14px ui-monospace;background:#fafbfe;color:#182033;padding:24px}}pre{{white-space:pre-wrap}}.source-line{{display:block;scroll-margin-top:24px}}.source-line b{{color:#8a93a6;font-weight:400}}.source-line.selected{{background:#fff0a8}}</style><h1>{html.escape(path)}</h1><pre>{numbered}</pre><script>document.getElementById('L{line}')?.scrollIntoView()</script>")
 
     @app.get("/artifacts/{review_id}/{name}")
     def artifact(review_id: str, name: str):
-        review = store.get_review(review_id)
+        try: review = store.get_review(review_id)
+        except KeyError: raise HTTPException(404)
         key = {"diagram": "diagram", "comparison": "comparison", "report": "report"}.get(name)
         if not key or not review["artifacts"].get(key): raise HTTPException(404)
-        target = Path(review["artifacts"][key]).resolve(); target.relative_to(settings.artifact_dir.resolve())
-        return FileResponse(target)
+        try:
+            target = Path(review["artifacts"][key]).resolve()
+            target.relative_to(app.state.settings.artifact_dir.resolve())
+        except (OSError, ValueError):
+            raise HTTPException(404, "Artifact is outside local review storage")
+        if not target.is_file():
+            raise HTTPException(404, "Artifact is unavailable")
+        headers = {}
+        if target.suffix.lower() == ".html":
+            headers["Content-Security-Policy"] = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:"
+        return FileResponse(target, headers=headers)
 
     @app.get("/api/projects")
     def api_projects(): return store.list_projects()
 
     @app.post("/api/projects", status_code=201)
-    def api_add_project(data: ProjectCreate, request: Request): require_local(request); return store.add_project(data)
+    def api_add_project(data: ProjectCreate, request: Request):
+        require_local(request)
+        try: return store.add_project(data)
+        except ValueError as exc: raise HTTPException(409, str(exc)) from exc
 
     @app.get("/api/projects/{project_id}")
     def api_project(project_id: str):
@@ -232,15 +293,97 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         except KeyError: raise HTTPException(404)
 
     @app.post("/api/projects/{project_id}/reviews", status_code=202)
-    def api_review(project_id: str, request: Request): require_local(request); return {"job_id": store.enqueue("review", project_id)}
+    def api_review(project_id: str, request: Request, force: bool = False):
+        require_local(request)
+        try: store.get_project(project_id)
+        except KeyError: raise HTTPException(404)
+        return {"job_id": store.enqueue("review", project_id, {"force": force})}
 
     @app.get("/api/jobs/{job_id}")
-    def api_job(job_id: str): return store.get_job(job_id)
+    def api_job(job_id: str):
+        try: return store.get_job(job_id)
+        except KeyError: raise HTTPException(404)
+
+    @app.post("/api/jobs/{job_id}/cancel")
+    def api_cancel_job(job_id: str, request: Request):
+        require_local(request)
+        try: job = store.request_cancel(job_id)
+        except KeyError: raise HTTPException(404)
+        if job["status"] == "running":
+            codex.cancel()
+        return job
 
     @app.post("/api/reviews/{review_id}/chat", status_code=202)
-    def api_chat(review_id: str, data: ChatRequest, request: Request): require_local(request); return {"job_id": store.enqueue("chat", None, data.model_dump(), review_id=review_id, priority=1)}
+    def api_chat(review_id: str, data: ChatRequest, request: Request):
+        require_local(request)
+        try: store.get_review(review_id)
+        except KeyError: raise HTTPException(404)
+        return {"job_id": store.enqueue("chat", None, data.model_dump(), review_id=review_id, priority=1)}
+
+    @app.get("/api/reviews/{review_id}/current-status")
+    def api_current_status(review_id: str):
+        try:
+            review = store.get_review(review_id)
+            snapshot = store.get_snapshot(review["snapshot_id"])
+            project = store.get_project(review["project_id"])
+            current = fingerprint_project(app.state.settings, project)
+        except KeyError:
+            raise HTTPException(404)
+        except CaptureError as exc:
+            return {"status": "folder_unavailable", "message": str(exc)}
+        return {
+            "status": "matches" if current["fingerprint"] == snapshot["fingerprint"] else "changed",
+            "fingerprint": current["fingerprint"],
+        }
+
+    @app.get("/api/settings")
+    def api_settings():
+        return {key: getattr(app.state.settings, key) for key in allowed_setting_keys}
+
+    def apply_app_settings(update: AppSettingsUpdate) -> dict:
+        nonlocal settings
+        values = update.model_dump(exclude_unset=True)
+        if not values:
+            return {key: getattr(settings, key) for key in allowed_setting_keys}
+        store.update_app_settings(values)
+        settings = replace(settings, **values)
+        app.state.settings = settings
+        engine.settings = settings
+        codex.settings = settings
+        codex._capability_cache = None
+        diagnostics_cache.update({"at": 0.0, "value": None})
+        return {key: getattr(settings, key) for key in allowed_setting_keys}
+
+    @app.patch("/api/settings")
+    def api_update_settings(data: AppSettingsUpdate, request: Request):
+        require_local(request)
+        return apply_app_settings(data)
+
+    @app.post("/settings/application")
+    def update_application_settings(
+        request: Request,
+        csrf: str = Form(alias="_csrf"),
+        codex_command: str = Form(),
+        codex_model: str = Form(default=""),
+        reasoning_effort: str = Form(default="low"),
+        codex_call_timeout: int = Form(default=300),
+        review_timeout: int = Form(default=900),
+        source_packet_chars: int = Form(default=48000),
+        source_packet_limit: int = Form(default=6),
+    ):
+        require_local(request, csrf)
+        try:
+            apply_app_settings(AppSettingsUpdate(
+                codex_command=codex_command, codex_model=codex_model or None,
+                reasoning_effort=reasoning_effort, codex_call_timeout=codex_call_timeout,
+                review_timeout=review_timeout, source_packet_chars=source_packet_chars,
+                source_packet_limit=source_packet_limit,
+            ))
+        except ValidationError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return RedirectResponse(url="/settings?saved=true", status_code=303)
 
     @app.post("/exit")
-    def exit_app(request: Request): require_local(request); app.state.shutdown_event.set(); return HTMLResponse("Architecture Coach is shutting down. You can close this tab.")
+    def exit_app(request: Request, csrf: str = Form(alias="_csrf")): require_local(request, csrf); app.state.shutdown_event.set(); return HTMLResponse("Architecture Coach is shutting down. You can close this tab.")
 
     return app

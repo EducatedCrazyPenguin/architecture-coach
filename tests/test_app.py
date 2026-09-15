@@ -70,8 +70,8 @@ def test_project_settings_update_schedule_goal_and_exclusions(tmp_path: Path):
     assert {item["path"] for item in captured["manifest"]} == {"app.py"}
 
     form_response = client.post(
-        f"/projects/{created['id']}/settings?token={token}",
-        data={"name": "Form update", "description": "Updated in the dashboard", "goal": "Ship it", "exclusions": "reports/**\ncache/", "interval_days": "21", "enabled": "on"},
+        f"/projects/{created['id']}/settings",
+        data={"_csrf": token, "name": "Form update", "description": "Updated in the dashboard", "goal": "Ship it", "exclusions": "reports/**\ncache/", "interval_days": "21", "enabled": "on"},
         follow_redirects=False,
     )
     assert form_response.status_code == 303
@@ -110,3 +110,80 @@ def test_review_history_can_compare_any_two_snapshots(tmp_path: Path):
     assert page.status_code == 200
     assert "Compare two saved reviews" in page.text
     assert "services/auth.py" in page.text
+
+
+def test_global_host_origin_and_csrf_protection(tmp_path: Path):
+    project = tmp_path / "project"; project.mkdir()
+    app, client = make_client(tmp_path); token = app.state.csrf_token
+    assert client.get("/", headers={"Host": "attacker.example"}).status_code == 400
+    denied = client.post(
+        "/api/projects",
+        headers={"X-ArchCoach-Token": token, "Origin": "https://attacker.example"},
+        json={"path": str(project)},
+    )
+    assert denied.status_code == 403
+    query_only = client.post(f"/api/projects?token={token}", json={"path": str(project)})
+    assert query_only.status_code == 403
+
+
+def test_partial_updates_preserve_omitted_fields_and_settings(tmp_path: Path):
+    project = tmp_path / "project"; project.mkdir()
+    app, client = make_client(tmp_path); token = app.state.csrf_token
+    headers = {"X-ArchCoach-Token": token}
+    created = client.post(
+        "/api/projects", headers=headers,
+        json={"path": str(project), "name": "Original", "description": "Keep me", "goal": "First", "interval_days": 17, "exclusions": ["build/"]},
+    ).json()
+    changed = client.patch(f"/api/projects/{created['id']}", headers=headers, json={"goal": "Second"})
+    assert changed.status_code == 200
+    assert changed.json() | {} == {**created, "goal": "Second"}
+
+    defaults = client.get("/api/settings").json()
+    updated = client.patch("/api/settings", headers=headers, json={"review_timeout": 1200})
+    assert updated.status_code == 200
+    assert updated.json()["review_timeout"] == 1200
+    assert updated.json()["codex_call_timeout"] == defaults["codex_call_timeout"]
+    app2 = create_app(Settings(data_dir=tmp_path / "data", app_dir=Path(__file__).parents[1] / "src" / "archcoach"), start_worker=False)
+    assert app2.state.settings.review_timeout == 1200
+
+
+def test_api_errors_are_actionable_and_terminal_cancel_is_stable(tmp_path: Path):
+    project = tmp_path / "project"; project.mkdir()
+    app, client = make_client(tmp_path); token = app.state.csrf_token
+    headers = {"X-ArchCoach-Token": token}
+    created = client.post("/api/projects", headers=headers, json={"path": str(project)}).json()
+    assert client.post("/api/projects", headers=headers, json={"path": str(project)}).status_code == 409
+    assert client.patch("/api/projects/missing", headers=headers, json={"goal": "x"}).status_code == 404
+    assert client.post("/api/reviews/missing/chat", headers=headers, json={"message": "hello"}).status_code == 404
+    assert client.patch("/api/settings", headers=headers, json={"review_timeout": 3}).status_code == 422
+
+    job_id = app.state.store.enqueue("review", created["id"])
+    first = client.post(f"/api/jobs/{job_id}/cancel", headers=headers)
+    second = client.post(f"/api/jobs/{job_id}/cancel", headers=headers)
+    assert first.json()["status"] == second.json()["status"] == "cancelled"
+    assert second.json()["cancellation_state"] == "cancelled"
+
+
+def test_saved_review_is_independent_of_live_folder_and_diagnostics(tmp_path: Path, monkeypatch):
+    project = tmp_path / "project"; project.mkdir(); (project / "app.py").write_text("x = 1\n", encoding="utf-8")
+    app, client = make_client(tmp_path); token = app.state.csrf_token
+    created = client.post("/api/projects", headers={"X-ArchCoach-Token": token}, json={"path": str(project)}).json()
+    from archcoach.review import ReviewEngine
+    from tests.test_review import OfflineCodex
+    review_id = ReviewEngine(app.state.settings, app.state.store, OfflineCodex()).run(created["id"])
+    blobs_before = sorted(path.relative_to(app.state.settings.blob_dir) for path in app.state.settings.blob_dir.rglob("*") if path.is_file())
+
+    page = client.get(f"/reviews/{review_id}")
+    assert page.status_code == 200
+    assert "Analysis coverage" in page.text
+    assert 'sandbox="allow-scripts"' in page.text
+    assert "Checking current files" in page.text
+    current = client.get(f"/api/reviews/{review_id}/current-status")
+    assert current.json()["status"] == "matches"
+    blobs_after = sorted(path.relative_to(app.state.settings.blob_dir) for path in app.state.settings.blob_dir.rglob("*") if path.is_file())
+    assert blobs_after == blobs_before
+
+    (project / "app.py").unlink(); project.rmdir()
+    assert client.get(f"/reviews/{review_id}").status_code == 200
+    unavailable = client.get(f"/api/reviews/{review_id}/current-status")
+    assert unavailable.json()["status"] == "folder_unavailable"
