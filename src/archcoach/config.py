@@ -12,6 +12,14 @@ class Settings:
     codex_command: str = "codex"
     host: str = "127.0.0.1"
     port: int = 8765
+    codex_model: str | None = None
+    reasoning_effort: str = "low"
+    codex_call_timeout: int = 300
+    review_timeout: int = 900
+    source_packet_chars: int = 48_000
+    source_packet_limit: int = 6
+    chat_history_chars: int = 24_000
+    chat_history_messages: int = 10
 
     @classmethod
     def load(cls, data_dir: Path | None = None) -> "Settings":
@@ -36,10 +44,13 @@ class Settings:
         return self.app_dir / "schemas"
 
     @property
+    def runtime_dir(self) -> Path:
+        return self.data_dir / "runtime"
+
+    @property
     def archify_cli(self) -> Path:
         return self.app_dir.parent.parent / "vendor" / "archify" / "archify" / "bin" / "archify.mjs"
 
     def ensure_dirs(self) -> None:
-        for path in (self.data_dir, self.blob_dir, self.artifact_dir):
+        for path in (self.data_dir, self.blob_dir, self.artifact_dir, self.runtime_dir):
             path.mkdir(parents=True, exist_ok=True)
-

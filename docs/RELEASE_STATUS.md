@@ -2,7 +2,7 @@
 
 Starting commit: `f324046e8f7fc30e42b4a964446302b0103b9268`
 
-Verified: **24/40** · Implemented awaiting checks: **0** · In progress: **0** · Blocked: **0** · Remaining: **16**
+Verified: **28/40** · Implemented awaiting checks: **0** · In progress: **0** · Blocked: **0** · Remaining: **12**
 
 ## Phase A
 
@@ -48,10 +48,10 @@ Verified: **24/40** · Implemented awaiting checks: **0** · In progress: **0** 
 
 ## Phase G
 
-- [ ] **G1** Restrict the analysis subprocess — `todo`
-- [ ] **G2** Bound source context and runtime — `todo`
-- [ ] **G3** Stream progress and classify failures — `todo`
-- [ ] **G4** Finish snapshot-based chat — `todo`
+- [x] **G1** Restrict the analysis subprocess — `verified`
+- [x] **G2** Bound source context and runtime — `verified`
+- [x] **G3** Stream progress and classify failures — `verified`
+- [x] **G4** Finish snapshot-based chat — `verified`
 
 ## Phase H
 

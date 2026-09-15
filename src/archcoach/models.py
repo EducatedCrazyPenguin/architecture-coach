@@ -51,7 +51,7 @@ class Architecture(BaseModel):
     model_config = ConfigDict(extra="forbid")
     summary: str
     main_path: list[str] = Field(default_factory=list)
-    components: list[Component]
+    components: list[Component] = Field(min_length=1, max_length=12)
     relationships: list[Relationship] = Field(default_factory=list)
 
     @model_validator(mode="after")

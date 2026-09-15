@@ -510,10 +510,21 @@ class Store:
             raise KeyError(job_id)
         return result
 
-    def add_message(self, conversation_id: str, role: str, content: str, citations: list | None = None) -> str:
+    def add_message(
+        self,
+        conversation_id: str,
+        role: str,
+        content: str,
+        citations: list | None = None,
+        *,
+        status: str = "complete",
+    ) -> str:
         message_id = uuid.uuid4().hex
         with self.connect() as conn:
-            conn.execute("INSERT INTO messages(id,conversation_id,role,content,citations_json,created_at) VALUES(?,?,?,?,?,?)", (message_id, conversation_id, role, content, json.dumps(citations or []), utc_now()))
+            conn.execute(
+                "INSERT INTO messages(id,conversation_id,role,content,citations_json,created_at,status) VALUES(?,?,?,?,?,?,?)",
+                (message_id, conversation_id, role, content, json.dumps(citations or []), utc_now(), status),
+            )
         return message_id
 
     def conversation_for_review(self, review_id: str) -> dict[str, Any]:

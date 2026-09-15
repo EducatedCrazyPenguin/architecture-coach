@@ -4,14 +4,16 @@ import json
 import re
 import tempfile
 import hashlib
+import time
 from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
 
-from .ai import ARCHITECTURE_PROMPT, CRITIQUE_PROMPT, CHAT_PROMPT, CodexAdapter, CodexError
+from .ai import ARCHITECTURE_PROMPT, CRITIQUE_PROMPT, CHAT_PROMPT, CodexAdapter, CodexError, CodexMalformedOutput
 from .analyze import analyze_snapshot, compact_analysis, manifest_changes
-from .capture import CaptureCancelled, capture_project, materialize_snapshot, read_blob
+from .capture import CaptureCancelled, capture_project, read_blob
 from .config import Settings
+from .context import bounded_history, build_source_packets
 from .db import JobCancelledError, Store
 from .diagram import render_comparison, render_diagram, stable_positions
 from .models import Architecture, ChatResponse, Component, Critique, Evidence, Finding, Lesson, Relationship, utc_now
@@ -34,6 +36,10 @@ def review_configuration_fingerprint(project: dict, settings: Settings) -> str:
         "analysis_format": ANALYSIS_FORMAT_VERSION,
         "review_format": REVIEW_FORMAT_VERSION,
         "codex_command": settings.codex_command,
+        "codex_model": settings.codex_model,
+        "reasoning_effort": settings.reasoning_effort,
+        "source_packet_chars": settings.source_packet_chars,
+        "source_packet_limit": settings.source_packet_limit,
     }
     return hashlib.sha256(json.dumps(relevant, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
@@ -307,6 +313,7 @@ class ReviewEngine:
                 raise ReviewCancelled("Review cancelled")
 
         project = self.store.get_project(project_id)
+        review_deadline = time.monotonic() + self.settings.review_timeout
         check_cancelled()
         progress(5, "Capturing current files")
         try:
@@ -354,18 +361,75 @@ class ReviewEngine:
             project_id, capture["fingerprint"], capture["manifest"], capture["git"], analysis,
             coverage, config_fingerprint=config_fingerprint, format_version=ANALYSIS_FORMAT_VERSION,
         )
-        with tempfile.TemporaryDirectory(prefix="archcoach-snapshot-") as temp:
-            root = Path(temp); materialize_snapshot(self.settings, {"manifest": capture["manifest"]}, root)
-            (root / "static-analysis.json").write_text(json.dumps(compact_analysis(analysis), indent=2), encoding="utf-8")
+        old_hashes = {item["path"]: item["sha256"] for item in (previous_snapshot or {}).get("manifest", [])}
+        new_hashes = {item["path"]: item["sha256"] for item in capture["manifest"]}
+        changed_paths = {
+            *set(old_hashes).symmetric_difference(new_hashes),
+            *(path for path in old_hashes.keys() & new_hashes.keys() if old_hashes[path] != new_hashes[path]),
+        }
+        previous_anchors = {
+            path
+            for component_data in (previous or {}).get("architecture", {}).get("components", [])
+            for path in (component_data.get("source_paths") or [item.get("path") for item in component_data.get("sources", [])])
+            if path
+        }
+        source_packets, source_note = build_source_packets(
+            self.settings, capture["manifest"], analysis,
+            changed_paths=changed_paths, anchors=previous_anchors,
+        )
+        usage_total: dict[str, int] = {}
+
+        def on_codex_event(event: dict) -> None:
+            if job_id:
+                fields = {"last_activity_at": utc_now(), "stage": "codex"}
+                usage = event.get("usage")
+                if isinstance(usage, dict):
+                    fields["usage_json"] = usage
+                self.store.update_job(job_id, **fields)
+
+        def run_pass(prompt: str, schema_name: str, validator):
+            for attempt in range(2):
+                check_cancelled()
+                remaining = int(review_deadline - time.monotonic())
+                if remaining <= 0:
+                    raise CodexError("Review exceeded its total time budget")
+                try:
+                    raw = self.codex.run_structured(
+                        prompt, self.settings.schema_dir / schema_name, root,
+                        on_event=on_codex_event, timeout=min(self.settings.codex_call_timeout, remaining),
+                        cancelled=is_cancelled,
+                    )
+                    validated = validator(raw)
+                    for key, value in getattr(self.codex, "last_usage", {}).items():
+                        usage_total[key] = usage_total.get(key, 0) + value
+                    return validated
+                except (ValueError, CodexMalformedOutput) as exc:
+                    if attempt:
+                        raise
+                    prompt += f"\n\nYour prior response failed validation: {exc}. Return one corrected response matching the schema."
+            raise AssertionError("unreachable")
+
+        self.settings.runtime_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="review-", dir=self.settings.runtime_dir) as temp:
+            root = Path(temp)
             ai_warnings: list[str] = []
+            ai_error_codes: list[str] = []
             progress(25, "Building architecture")
             check_cancelled()
             try:
-                raw = self.codex.run_structured(ARCHITECTURE_PROMPT.format(description=project["description"], goal=project["goal"], coverage=json.dumps(coverage)), self.settings.schema_dir / "architecture.json", root)
-                architecture = validate_architecture_snapshot(Architecture.model_validate(raw), capture["manifest"])
+                architecture = run_pass(
+                    ARCHITECTURE_PROMPT.format(
+                        description=project["description"], goal=project["goal"],
+                        coverage=json.dumps(coverage), analysis=json.dumps(compact_analysis(analysis)),
+                        source_note=source_note, source_packets=source_packets,
+                    ),
+                    "architecture.json",
+                    lambda raw: validate_architecture_snapshot(Architecture.model_validate(raw), capture["manifest"]),
+                )
             except (CodexError, ValueError, json.JSONDecodeError) as exc:
                 check_cancelled()
                 ai_warnings.append(f"Architecture analysis used the deterministic fallback: {exc}")
+                ai_error_codes.append(getattr(exc, "code", "invalid_architecture"))
                 architecture = heuristic_architecture(project, analysis)
             check_cancelled()
             validate_architecture_snapshot(architecture, capture["manifest"])
@@ -379,15 +443,22 @@ class ReviewEngine:
                 previous, previous_snapshot, capture["manifest"], architecture, analysis,
                 identity_uncertainty,
             )
-            (root / "architecture.json").write_text(architecture.model_dump_json(indent=2), encoding="utf-8")
             progress(55, "Reviewing design and preparing lessons")
             check_cancelled()
             try:
-                raw = self.codex.run_structured(CRITIQUE_PROMPT.format(goal=project["goal"], changes=json.dumps(changes)), self.settings.schema_dir / "critique.json", root)
-                critique = validate_critique_quality(Critique.model_validate(raw))
+                critique = run_pass(
+                    CRITIQUE_PROMPT.format(
+                        goal=project["goal"], changes=json.dumps(changes),
+                        architecture=architecture.model_dump_json(), source_note=source_note,
+                        source_packets=source_packets,
+                    ),
+                    "critique.json",
+                    lambda raw: validate_critique_quality(Critique.model_validate(raw)),
+                )
             except (CodexError, ValueError, json.JSONDecodeError) as exc:
                 check_cancelled()
                 ai_warnings.append(f"Critique used the deterministic fallback: {exc}")
+                ai_error_codes.append(getattr(exc, "code", "invalid_critique"))
                 critique = heuristic_critique(analysis)
             validate_evidence(critique, capture["manifest"])
         check_cancelled()
@@ -408,6 +479,7 @@ class ReviewEngine:
             )
             check_cancelled()
             artifacts["ai_warnings"] = ai_warnings
+            artifacts["source_context"] = source_note
             if previous and previous["artifacts"].get("architecture_ir"):
                 comparison = render_comparison(
                     self.settings, Path(previous["artifacts"]["architecture_ir"]),
@@ -422,6 +494,12 @@ class ReviewEngine:
             report_path.write_text(markdown_report(project, architecture, critique, changes), encoding="utf-8")
             artifacts["report"] = str(report_path)
             check_cancelled()
+            if job_id:
+                self.store.update_job(
+                    job_id,
+                    usage_json=usage_total,
+                    error_code=ai_error_codes[0] if ai_error_codes else None,
+                )
             self.store.finalize_review(
                 review_stub, project_id, artifacts, quality=quality, job_id=job_id,
             )
@@ -443,24 +521,60 @@ class ReviewEngine:
             raise ReviewCancelled("Chat cancelled")
         review = self.store.get_review(review_id); snapshot = self.store.get_snapshot(review["snapshot_id"]); conversation = self.store.conversation_for_review(review_id)
         self.store.add_message(conversation["id"], "user", message)
-        history = "\n".join(f"{m['role']}: {m['content']}" for m in conversation["messages"][-10:])
-        with tempfile.TemporaryDirectory(prefix="archcoach-chat-") as temp:
-            root = Path(temp); materialize_snapshot(self.settings, snapshot, root)
-            (root / "review-context.json").write_text(json.dumps({"architecture": review["architecture"], "critique": review["critique"], "changes": review["changes"]}, indent=2), encoding="utf-8")
+        history, history_note = bounded_history(conversation["messages"], self.settings)
+        anchors = {
+            path
+            for component_data in review["architecture"].get("components", [])
+            for path in (component_data.get("source_paths") or [item.get("path") for item in component_data.get("sources", [])])
+            if path
+        }
+        source_packets, source_note = build_source_packets(
+            self.settings, snapshot["manifest"], snapshot["analysis"], anchors=anchors,
+        )
+        self.settings.runtime_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="chat-", dir=self.settings.runtime_dir) as temp:
+            root = Path(temp)
+            prompt = CHAT_PROMPT.format(
+                history=history, history_note=history_note, message=message,
+                review=json.dumps({
+                    "id": review["id"], "snapshot_id": snapshot["id"],
+                    "architecture": review["architecture"], "critique": review["critique"],
+                    "changes": review["changes"], "coverage": snapshot["coverage"],
+                }),
+                source_note=source_note, source_packets=source_packets,
+            )
             try:
-                response = ChatResponse.model_validate(self.codex.run_structured(CHAT_PROMPT.format(history=history, message=message), self.settings.schema_dir / "chat.json", root))
+                response = None
+                for attempt in range(2):
+                    try:
+                        response = ChatResponse.model_validate(self.codex.run_structured(
+                            prompt, self.settings.schema_dir / "chat.json", root,
+                            timeout=self.settings.codex_call_timeout, cancelled=is_cancelled,
+                        ))
+                        break
+                    except (ValueError, CodexMalformedOutput) as exc:
+                        if attempt:
+                            raise
+                        prompt += f"\nYour response failed validation: {exc}. Return one corrected schema response."
+                assert response is not None
                 if is_cancelled():
                     raise ReviewCancelled("Chat cancelled")
                 citations = validate_evidence_items(response.citations, snapshot["manifest"])
                 answer = response.answer
+                if "outside the active context" in history_note:
+                    answer = f"Context note: {history_note}\n\n{answer}"
             except (CodexError, ValueError, KeyError, json.JSONDecodeError) as exc:
                 if is_cancelled():
                     raise ReviewCancelled("Chat cancelled") from exc
                 answer = f"I could not run Codex for this question: {exc}. The saved review remains available."
-                citations = []
+                self.store.add_message(conversation["id"], "assistant", answer, [], status="failed")
+                raise
         if is_cancelled():
             raise ReviewCancelled("Chat cancelled")
-        self.store.add_message(conversation["id"], "assistant", answer, [item.model_dump() for item in citations])
+        self.store.add_message(
+            conversation["id"], "assistant", answer,
+            [item.model_dump() for item in citations], status="complete",
+        )
         return conversation["id"]
 
 
