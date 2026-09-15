@@ -170,7 +170,8 @@ def eligible_files(
             if _matches_exclusion(relative, exclusions):
                 omissions.append(f"Excluded by project rule: {relative}")
                 continue
-            if path.suffix.lower() not in SOURCE_EXTENSIONS:
+            is_requirements = lower.startswith("requirements") and path.suffix.lower() == ".txt"
+            if path.suffix.lower() not in SOURCE_EXTENSIONS and not is_requirements:
                 continue
             try:
                 resolved = path.resolve()

@@ -2,7 +2,7 @@
 
 Starting commit: `f324046e8f7fc30e42b4a964446302b0103b9268`
 
-Verified: **12/40** · Implemented awaiting checks: **0** · In progress: **0** · Blocked: **0** · Remaining: **28**
+Verified: **16/40** · Implemented awaiting checks: **0** · In progress: **0** · Blocked: **0** · Remaining: **24**
 
 ## Phase A
 
@@ -27,10 +27,10 @@ Verified: **12/40** · Implemented awaiting checks: **0** · In progress: **0** 
 
 ## Phase D
 
-- [ ] **D1** Fix Python imports — `todo`
-- [ ] **D2** Fix JavaScript and TypeScript imports — `todo`
-- [ ] **D3** Fix graph and manifest analysis — `todo`
-- [ ] **D4** Make coverage accurate — `todo`
+- [x] **D1** Fix Python imports — `verified`
+- [x] **D2** Fix JavaScript and TypeScript imports — `verified`
+- [x] **D3** Fix graph and manifest analysis — `verified`
+- [x] **D4** Make coverage accurate — `verified`
 
 ## Phase E
 
