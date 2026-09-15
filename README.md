@@ -60,3 +60,5 @@ archcoach doctor
 ```
 
 The application is divided into capture, static analysis, Codex, review, diagram, persistence, worker, and web layers. JSON schemas under `src/archcoach/schemas` constrain Codex output.
+
+Product ideas being considered for later releases are tracked in `docs/FUTURE_UPDATES.md`.
