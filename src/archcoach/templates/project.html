@@ -8,10 +8,14 @@
 <div class="path-strip"><span>Local folder</span><code>{{ project.path }}</code></div>
 {% if project.goal %}<section class="panel"><p class="eyebrow">Current goal</p><p>{{ project.goal }}</p></section>{% endif %}
 <section class="section-head"><div><p class="eyebrow">Timeline</p><h2>Review history</h2></div>{% if reviews|length >= 2 %}<a class="secondary button-link" href="/projects/{{ project.id }}/compare">Compare reviews</a>{% endif %}</section>
-{% if reviews %}
+{% if history %}
 <div class="timeline">
-  {% for item in reviews %}
-  <a href="/reviews/{{ item.id }}" class="timeline-item"><span class="timeline-dot"></span><div><h3>{{ item.created_at[:10] }}</h3><p>{{ 'No source changes' if item.status == 'unchanged' else item.architecture.summary }}</p></div><span class="pill {{ 'ok' if item.status in ['complete','unchanged'] else 'warn' }}">{{ item.status }}</span></a>
+  {% for item in history %}
+  {% if item.history_type == 'check' %}
+  <a href="/reviews/{{ item.review_id }}" class="timeline-item"><span class="timeline-dot"></span><div><h3>{{ item.created_at[:10] }}</h3><p>Checked current files — no source or review-setting changes.</p></div><span class="pill ok">unchanged check</span></a>
+  {% else %}
+  <a href="/reviews/{{ item.id }}" class="timeline-item"><span class="timeline-dot"></span><div><h3>{{ item.created_at[:10] }}</h3><p>{{ item.architecture.summary }}</p></div><span class="pill {{ 'ok' if item.status in ['complete','unchanged'] else 'warn' }}">{{ item.quality if item.quality else item.status }}</span></a>
+  {% endif %}
   {% endfor %}
 </div>
 {% else %}

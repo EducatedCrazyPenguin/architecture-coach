@@ -14,7 +14,7 @@ class OfflineCodex:
     def cancel(self): return None
 
 
-def test_review_completes_offline_and_reuses_unchanged_source(tmp_path: Path):
+def test_limited_offline_review_is_regenerated_when_source_is_unchanged(tmp_path: Path):
     source = tmp_path / "source"; source.mkdir()
     (source / "app.py").write_text("def main():\n    return 'hello'\n", encoding="utf-8")
     settings = Settings(data_dir=tmp_path / "data", app_dir=Path(__file__).parents[1] / "src" / "archcoach"); settings.ensure_dirs()
@@ -29,8 +29,9 @@ def test_review_completes_offline_and_reuses_unchanged_source(tmp_path: Path):
     assert 1 <= len(first["critique"]["lessons"]) <= 3
 
     second = store.get_review(engine.run(project["id"]))
-    assert second["status"] == "unchanged"
-    assert second["reused_from_id"] == first_id
+    assert second["id"] != first_id
+    assert first["quality"] == second["quality"] == "limited"
+    assert store.list_check_events(project["id"]) == []
 
 
 def test_review_does_not_modify_project(tmp_path: Path):

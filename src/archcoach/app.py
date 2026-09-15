@@ -17,7 +17,7 @@ from .ai import CodexAdapter
 from .config import Settings
 from .db import Store
 from .models import ChatRequest, LessonStatusRequest, ProjectCreate, ProjectUpdate
-from .review import ReviewEngine, compare_saved_reviews, source_text
+from .review import ReviewEngine, compare_saved_reviews, source_text, validate_comparison_records
 from .worker import Worker
 
 
@@ -72,7 +72,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         try: project = store.get_project(project_id)
         except KeyError: raise HTTPException(404)
         reviews = store.list_reviews(project_id); selected = reviews[0] if reviews else None
-        return templates.TemplateResponse(request=request, name="project.html", context=context(request, page="project", project=project, reviews=reviews, review=selected))
+        return templates.TemplateResponse(request=request, name="project.html", context=context(request, page="project", project=project, reviews=reviews, history=store.list_history(project_id), review=selected))
 
     @app.get("/reviews/{review_id}", response_class=HTMLResponse)
     def review_page(review_id: str, request: Request):
@@ -94,6 +94,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         before = store.get_review(before_id); after = store.get_review(after_id)
         if before["project_id"] != project_id or after["project_id"] != project_id:
             raise HTTPException(404)
+        try:
+            validate_comparison_records(before, after)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
         before_snapshot = store.get_snapshot(before["snapshot_id"]); after_snapshot = store.get_snapshot(after["snapshot_id"])
         return project, reviews, before, after, compare_saved_reviews(before, before_snapshot, after, after_snapshot)
 
@@ -206,6 +210,12 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         try: store.get_project(project_id)
         except KeyError: raise HTTPException(404)
         return store.list_reviews(project_id)
+
+    @app.get("/api/projects/{project_id}/history")
+    def api_history(project_id: str):
+        try: store.get_project(project_id)
+        except KeyError: raise HTTPException(404)
+        return store.list_history(project_id)
 
     @app.get("/api/projects/{project_id}/comparison")
     def api_comparison(project_id: str, before: str | None = None, after: str | None = None):

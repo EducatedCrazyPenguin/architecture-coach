@@ -2,7 +2,7 @@
 
 Starting commit: `f324046e8f7fc30e42b4a964446302b0103b9268`
 
-Verified: **20/40** · Implemented awaiting checks: **0** · In progress: **0** · Blocked: **0** · Remaining: **20**
+Verified: **24/40** · Implemented awaiting checks: **0** · In progress: **0** · Blocked: **0** · Remaining: **16**
 
 ## Phase A
 
@@ -41,10 +41,10 @@ Verified: **20/40** · Implemented awaiting checks: **0** · In progress: **0** 
 
 ## Phase F
 
-- [ ] **F1** Define review fingerprints — `todo`
-- [ ] **F2** Record unchanged checks without duplicate reviews — `todo`
-- [ ] **F3** Preserve legacy history — `todo`
-- [ ] **F4** Validate comparison selection — `todo`
+- [x] **F1** Define review fingerprints — `verified`
+- [x] **F2** Record unchanged checks without duplicate reviews — `verified`
+- [x] **F3** Preserve legacy history — `verified`
+- [x] **F4** Validate comparison selection — `verified`
 
 ## Phase G
 

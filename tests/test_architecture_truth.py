@@ -144,3 +144,14 @@ def test_semantic_comparison_reports_confirmed_and_inferred_edges_separately():
     changes = semantic_comparison(before, snapshot, after, snapshot)
     assert changes["relationships_added"] == []
     assert changes["inferred_relationships_added"] == [("a", "b")]
+
+
+def test_semantic_comparison_discloses_branch_and_coverage_changes():
+    architecture = Architecture(summary="x", components=[component("a", "a.py")])
+    before = {"manifest": [], "analysis": {"manifests": {}}, "git": {"branch": "main"}, "coverage": {"level": "standard"}}
+    after = {"manifest": [], "analysis": {"manifests": {}}, "git": {"branch": "feature"}, "coverage": {"level": "limited"}}
+
+    changes = semantic_comparison(architecture, before, architecture, after)
+
+    assert changes["branches"] == {"before": "main", "after": "feature", "changed": True}
+    assert changes["coverage"] == {"before": "standard", "after": "limited"}

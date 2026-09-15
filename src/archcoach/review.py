@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import tempfile
+import hashlib
 from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
@@ -19,6 +20,22 @@ from .subprocesses import ProcessCancelled
 
 class ReviewCancelled(RuntimeError):
     pass
+
+
+ANALYSIS_FORMAT_VERSION = 2
+REVIEW_FORMAT_VERSION = 2
+
+
+def review_configuration_fingerprint(project: dict, settings: Settings) -> str:
+    relevant = {
+        "description": project.get("description", ""),
+        "goal": project.get("goal", ""),
+        "exclusions": sorted(project.get("exclusions", [])),
+        "analysis_format": ANALYSIS_FORMAT_VERSION,
+        "review_format": REVIEW_FORMAT_VERSION,
+        "codex_command": settings.codex_command,
+    }
+    return hashlib.sha256(json.dumps(relevant, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def _slug(text: str, fallback: str) -> str:
@@ -196,6 +213,15 @@ def semantic_comparison(
     identity_uncertainty: list[dict] | None = None,
 ) -> dict:
     current_manifest = after_snapshot.get("manifest", [])
+    branch_context = {
+        "before": (before_snapshot or {}).get("git", {}).get("branch"),
+        "after": after_snapshot.get("git", {}).get("branch"),
+        "changed": before_snapshot is not None and (before_snapshot or {}).get("git", {}).get("branch") != after_snapshot.get("git", {}).get("branch"),
+    }
+    coverage_context = {
+        "before": (before_snapshot or {}).get("coverage", {}).get("level"),
+        "after": after_snapshot.get("coverage", {}).get("level"),
+    }
     if before is None:
         return {
             "baseline": True, "components_added": sorted(c.id for c in after.components),
@@ -204,6 +230,7 @@ def semantic_comparison(
             "inferred_relationships_removed": [], "files_added": sorted(item["path"] for item in current_manifest),
             "files_removed": [], "files_changed": [], "manifest_changes": manifest_changes({}, after_snapshot.get("analysis", {}).get("manifests", {})),
             "identity_uncertainty": identity_uncertainty or [],
+            "branches": branch_context, "coverage": coverage_context,
         }
     before_components = {component.id: (component.kind, _membership(component)) for component in before.components}
     after_components = {component.id: (component.kind, _membership(component)) for component in after.components}
@@ -227,6 +254,7 @@ def semantic_comparison(
         "files_changed": sorted(key for key in new_files.keys() & old_files.keys() if new_files[key] != old_files[key]),
         "manifest_changes": manifest_changes((before_snapshot or {}).get("analysis", {}).get("manifests", {}), after_snapshot.get("analysis", {}).get("manifests", {})),
         "identity_uncertainty": identity_uncertainty or [],
+        "branches": branch_context, "coverage": coverage_context,
     }
 
 
@@ -246,6 +274,16 @@ def compare_saved_reviews(before: dict, before_snapshot: dict, after: dict, afte
         Architecture.model_validate(after["architecture"]), after_snapshot,
         identity_uncertainty=after.get("changes", {}).get("identity_uncertainty", []),
     )
+
+
+def validate_comparison_records(before: dict, after: dict) -> None:
+    if before["project_id"] != after["project_id"]:
+        raise ValueError("Reviews must belong to the same project")
+    for review in (before, after):
+        if review["status"] not in {"complete", "unchanged"}:
+            raise ValueError("Comparison requires saved completed reviews")
+        if review.get("quality") not in {"complete", "limited"}:
+            raise ValueError("Legacy reviews need regeneration before semantic comparison")
 
 
 class ReviewEngine:
@@ -276,39 +314,46 @@ class ReviewEngine:
         except CaptureCancelled as exc:
             raise ReviewCancelled(str(exc)) from exc
         check_cancelled()
+        config_fingerprint = review_configuration_fingerprint(project, self.settings)
         previous = None; previous_snapshot = None
         for candidate in self.store.list_reviews(project_id):
-            if candidate["status"] not in {"complete", "unchanged"}: continue
+            if candidate["status"] not in {"complete", "unchanged"}:
+                continue
+            if candidate.get("format_version", 1) < REVIEW_FORMAT_VERSION or candidate.get("quality") not in {"complete", "limited"}:
+                continue
             candidate_snapshot = self.store.get_snapshot(candidate["snapshot_id"])
             if candidate_snapshot["git"].get("branch") == capture["git"].get("branch"):
                 previous, previous_snapshot = candidate, candidate_snapshot
                 break
+        if previous and not force:
+            reusable = (
+                previous.get("quality") == "complete"
+                and previous_snapshot.get("format_version", 1) >= ANALYSIS_FORMAT_VERSION
+                and previous_snapshot["fingerprint"] == capture["fingerprint"]
+                and previous_snapshot.get("config_fingerprint") == config_fingerprint
+                and capture.get("coverage") == "complete"
+            )
+            if reusable:
+                check_cancelled()
+                try:
+                    self.store.record_unchanged_check(
+                        project_id, previous["id"], capture["fingerprint"], config_fingerprint,
+                        job_id=job_id,
+                    )
+                except JobCancelledError as exc:
+                    raise ReviewCancelled(str(exc)) from exc
+                progress(100, "No source or review-setting changes")
+                return previous["id"]
         try:
             analysis = analyze_snapshot(self.settings, capture["manifest"], cancelled=is_cancelled)
         except ProcessCancelled as exc:
             raise ReviewCancelled(str(exc)) from exc
         check_cancelled()
         coverage = {**analysis["coverage"], "capture_omissions": capture["omissions"], "unstable": capture["unstable"]}
-        snapshot_id = self.store.create_snapshot(project_id, capture["fingerprint"], capture["manifest"], capture["git"], analysis, coverage)
-        if previous and not force:
-            same_branch = previous_snapshot["git"].get("branch") == capture["git"].get("branch")
-            if previous_snapshot["fingerprint"] == capture["fingerprint"] and same_branch:
-                check_cancelled()
-                review_id = self.store.create_review(
-                    project_id, snapshot_id, previous["id"], "rendering", previous["architecture"],
-                    previous["critique"], {"unchanged": True}, previous["artifacts"], previous["id"],
-                    quality=previous.get("quality", "complete"),
-                )
-                try:
-                    self.store.finalize_review(
-                        review_id, project_id, previous["artifacts"],
-                        quality=previous.get("quality", "complete"), job_id=job_id, status="unchanged",
-                    )
-                except JobCancelledError as exc:
-                    self.store.delete_unpublished_review(review_id)
-                    raise ReviewCancelled(str(exc)) from exc
-                progress(100, "No source changes")
-                return review_id
+        snapshot_id = self.store.create_snapshot(
+            project_id, capture["fingerprint"], capture["manifest"], capture["git"], analysis,
+            coverage, config_fingerprint=config_fingerprint, format_version=ANALYSIS_FORMAT_VERSION,
+        )
         with tempfile.TemporaryDirectory(prefix="archcoach-snapshot-") as temp:
             root = Path(temp); materialize_snapshot(self.settings, {"manifest": capture["manifest"]}, root)
             (root / "static-analysis.json").write_text(json.dumps(compact_analysis(analysis), indent=2), encoding="utf-8")
@@ -346,7 +391,7 @@ class ReviewEngine:
                 critique = heuristic_critique(analysis)
             validate_evidence(critique, capture["manifest"])
         check_cancelled()
-        quality = "limited" if ai_warnings or capture.get("coverage") == "limited" else "complete"
+        quality = "limited" if ai_warnings or capture.get("coverage") == "limited" or analysis["coverage"]["level"] == "limited" else "complete"
         positions = stable_positions(architecture, previous.get("positions") if previous else None)
         review_stub = self.store.create_review(
             project_id, snapshot_id, previous["id"] if previous else None, "rendering",

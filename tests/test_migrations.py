@@ -25,6 +25,9 @@ def test_legacy_database_is_backed_up_and_migrated_without_data_loss(tmp_path: P
     assert store.get_review("r")["snapshot_id"] == "s"
     assert store.conversation_for_review("r")["messages"][0]["content"] == "hello"
     assert store.lesson_statuses("r") == {"lesson": "learning"}
+    assert store.list_history("p")[0]["history_type"] == "review"
+    assert store.get_review("r")["quality"] == "legacy"
+    assert store.get_review("r")["format_version"] == 1
     assert len(list((tmp_path / "backups").glob("archcoach-v1-*.db"))) == 1
 
 

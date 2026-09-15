@@ -234,10 +234,25 @@ class Store:
                 )
         return self.get_project(project_id)
 
-    def create_snapshot(self, project_id: str, fingerprint: str, manifest: list[dict], git: dict, analysis: dict, coverage: dict) -> str:
+    def create_snapshot(
+        self,
+        project_id: str,
+        fingerprint: str,
+        manifest: list[dict],
+        git: dict,
+        analysis: dict,
+        coverage: dict,
+        *,
+        config_fingerprint: str = "",
+        format_version: int = 2,
+    ) -> str:
         snapshot_id = uuid.uuid4().hex
         with self.connect() as conn:
-            conn.execute("INSERT INTO snapshots(id,project_id,created_at,fingerprint,manifest_json,git_json,analysis_json,coverage_json) VALUES(?,?,?,?,?,?,?,?)", (snapshot_id, project_id, utc_now(), fingerprint, json.dumps(manifest), json.dumps(git), json.dumps(analysis), json.dumps(coverage)))
+            conn.execute(
+                "INSERT INTO snapshots(id,project_id,created_at,fingerprint,manifest_json,git_json,analysis_json,coverage_json,config_fingerprint,format_version) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (snapshot_id, project_id, utc_now(), fingerprint, json.dumps(manifest), json.dumps(git),
+                 json.dumps(analysis), json.dumps(coverage), config_fingerprint, format_version),
+            )
         return snapshot_id
 
     def get_snapshot(self, snapshot_id: str) -> dict[str, Any]:
@@ -258,6 +273,18 @@ class Store:
         with self.connect() as conn:
             rows = conn.execute("SELECT * FROM reviews WHERE project_id=? ORDER BY created_at DESC", (project_id,)).fetchall()
         return [self._row(row) for row in rows]
+
+    def list_check_events(self, project_id: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM check_events WHERE project_id=? ORDER BY created_at DESC", (project_id,),
+            ).fetchall()
+        return [self._row(row) for row in rows]
+
+    def list_history(self, project_id: str) -> list[dict[str, Any]]:
+        reviews = [{**item, "history_type": "review"} for item in self.list_reviews(project_id)]
+        checks = [{**item, "history_type": "check"} for item in self.list_check_events(project_id)]
+        return sorted([*reviews, *checks], key=lambda item: (item["created_at"], item["id"]), reverse=True)
 
     def get_review(self, review_id: str) -> dict[str, Any]:
         with self.connect() as conn:
@@ -325,6 +352,37 @@ class Store:
     def delete_unpublished_review(self, review_id: str) -> None:
         with self.connect() as conn:
             conn.execute("DELETE FROM reviews WHERE id=? AND status='rendering'", (review_id,))
+
+    def record_unchanged_check(
+        self,
+        project_id: str,
+        review_id: str,
+        source_fingerprint: str,
+        config_fingerprint: str,
+        *,
+        job_id: str | None = None,
+    ) -> str:
+        event_id = uuid.uuid4().hex
+        now = utc_now()
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if job_id:
+                job = conn.execute("SELECT status,cancel_requested FROM jobs WHERE id=?", (job_id,)).fetchone()
+                if not job or job["status"] != "running" or job["cancel_requested"]:
+                    raise JobCancelledError("Job was cancelled before unchanged check publication")
+            conn.execute(
+                "INSERT INTO check_events(id,project_id,review_id,created_at,source_fingerprint,config_fingerprint,result) VALUES(?,?,?,?,?,?,?)",
+                (event_id, project_id, review_id, now, source_fingerprint, config_fingerprint, "unchanged"),
+            )
+            conn.execute(
+                "UPDATE projects SET last_checked_at=?,schedule_error=NULL WHERE id=?", (now, project_id),
+            )
+            if job_id:
+                conn.execute(
+                    "UPDATE jobs SET status='complete',stage='complete',progress=100,message='Checked — no changes',result_json=?,finished_at=?,last_activity_at=? WHERE id=?",
+                    (json.dumps({"review_id": review_id, "check_event_id": event_id, "unchanged": True}), now, now, job_id),
+                )
+        return event_id
 
     def enqueue(
         self,
