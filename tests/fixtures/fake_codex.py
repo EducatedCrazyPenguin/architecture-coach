@@ -27,7 +27,8 @@ if mode == "fail":
 if mode == "stall":
     time.sleep(60)
 if mode == "spawn_child":
-    subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    print(json.dumps({"type": "fixture.child", "pid": child.pid}), flush=True)
     time.sleep(60)
 
 print(json.dumps({"type": "thread.started", "thread_id": "synthetic"}), flush=True)

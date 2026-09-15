@@ -2,7 +2,7 @@
 
 Starting commit: `f324046e8f7fc30e42b4a964446302b0103b9268`
 
-Verified: **8/40** · Implemented awaiting checks: **0** · In progress: **0** · Blocked: **0** · Remaining: **32**
+Verified: **12/40** · Implemented awaiting checks: **0** · In progress: **0** · Blocked: **0** · Remaining: **28**
 
 ## Phase A
 
@@ -20,10 +20,10 @@ Verified: **8/40** · Implemented awaiting checks: **0** · In progress: **0** �
 
 ## Phase C
 
-- [ ] **C1** Establish exclusive worker ownership — `todo`
-- [ ] **C2** Make the queue atomic and shared — `todo`
-- [ ] **C3** Implement cancellation throughout — `todo`
-- [ ] **C4** Make scheduling and recovery predictable — `todo`
+- [x] **C1** Establish exclusive worker ownership — `verified`
+- [x] **C2** Make the queue atomic and shared — `verified`
+- [x] **C3** Implement cancellation throughout — `verified`
+- [x] **C4** Make scheduling and recovery predictable — `verified`
 
 ## Phase D
 

@@ -155,9 +155,9 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         require_local(request)
         try: job = store.get_job(job_id)
         except KeyError: raise HTTPException(404)
-        store.update_job(job_id, cancel_requested=1, message="Cancellation requested")
-        if job["status"] == "queued": store.update_job(job_id, status="cancelled", finished_at=datetime.now().astimezone().isoformat())
-        elif job["status"] == "running": codex.cancel()
+        updated = store.request_cancel(job_id)
+        if updated["status"] == "running":
+            codex.cancel()
         return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
 
     @app.post("/reviews/{review_id}/chat")

@@ -3,15 +3,21 @@ from __future__ import annotations
 import json
 import re
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 from .ai import ARCHITECTURE_PROMPT, CRITIQUE_PROMPT, CHAT_PROMPT, CodexAdapter, CodexError
 from .analyze import analyze_snapshot, compact_analysis
-from .capture import capture_project, materialize_snapshot, read_blob
+from .capture import CaptureCancelled, capture_project, materialize_snapshot, read_blob
 from .config import Settings
-from .db import Store
+from .db import JobCancelledError, Store
 from .diagram import render_comparison, render_diagram
 from .models import Architecture, ChatResponse, Component, Critique, Evidence, Finding, Lesson, Relationship, utc_now
+from .subprocesses import ProcessCancelled
+
+
+class ReviewCancelled(RuntimeError):
+    pass
 
 
 def _slug(text: str, fallback: str) -> str:
@@ -134,10 +140,30 @@ class ReviewEngine:
     def __init__(self, settings: Settings, store: Store, codex: CodexAdapter | None = None):
         self.settings, self.store, self.codex = settings, store, codex or CodexAdapter(settings)
 
-    def run(self, project_id: str, progress=lambda p, m: None) -> str:
+    def run(
+        self,
+        project_id: str,
+        progress=lambda p, m: None,
+        *,
+        cancelled: Callable[[], bool] | None = None,
+        job_id: str | None = None,
+        force: bool = False,
+    ) -> str:
+        is_cancelled = cancelled or (lambda: False)
+
+        def check_cancelled() -> None:
+            if is_cancelled():
+                self.codex.cancel()
+                raise ReviewCancelled("Review cancelled")
+
         project = self.store.get_project(project_id)
+        check_cancelled()
         progress(5, "Capturing current files")
-        capture = capture_project(self.settings, project)
+        try:
+            capture = capture_project(self.settings, project, cancelled=is_cancelled)
+        except CaptureCancelled as exc:
+            raise ReviewCancelled(str(exc)) from exc
+        check_cancelled()
         previous = None; previous_snapshot = None
         for candidate in self.store.list_reviews(project_id):
             if candidate["status"] not in {"complete", "unchanged"}: continue
@@ -145,54 +171,108 @@ class ReviewEngine:
             if candidate_snapshot["git"].get("branch") == capture["git"].get("branch"):
                 previous, previous_snapshot = candidate, candidate_snapshot
                 break
-        analysis = analyze_snapshot(self.settings, capture["manifest"])
+        try:
+            analysis = analyze_snapshot(self.settings, capture["manifest"], cancelled=is_cancelled)
+        except ProcessCancelled as exc:
+            raise ReviewCancelled(str(exc)) from exc
+        check_cancelled()
         coverage = {**analysis["coverage"], "capture_omissions": capture["omissions"], "unstable": capture["unstable"]}
         snapshot_id = self.store.create_snapshot(project_id, capture["fingerprint"], capture["manifest"], capture["git"], analysis, coverage)
-        if previous:
+        if previous and not force:
             same_branch = previous_snapshot["git"].get("branch") == capture["git"].get("branch")
             if previous_snapshot["fingerprint"] == capture["fingerprint"] and same_branch:
-                review_id = self.store.create_review(project_id, snapshot_id, previous["id"], "unchanged", previous["architecture"], previous["critique"], {"unchanged": True}, previous["artifacts"], previous["id"])
-                self.store.update_project(project_id, last_checked_at=utc_now()); progress(100, "No source changes")
+                check_cancelled()
+                review_id = self.store.create_review(
+                    project_id, snapshot_id, previous["id"], "rendering", previous["architecture"],
+                    previous["critique"], {"unchanged": True}, previous["artifacts"], previous["id"],
+                    quality=previous.get("quality", "complete"),
+                )
+                try:
+                    self.store.finalize_review(
+                        review_id, project_id, previous["artifacts"],
+                        quality=previous.get("quality", "complete"), job_id=job_id, status="unchanged",
+                    )
+                except JobCancelledError as exc:
+                    self.store.delete_unpublished_review(review_id)
+                    raise ReviewCancelled(str(exc)) from exc
+                progress(100, "No source changes")
                 return review_id
         with tempfile.TemporaryDirectory(prefix="archcoach-snapshot-") as temp:
             root = Path(temp); materialize_snapshot(self.settings, {"manifest": capture["manifest"]}, root)
             (root / "static-analysis.json").write_text(json.dumps(compact_analysis(analysis), indent=2), encoding="utf-8")
             ai_warnings: list[str] = []
             progress(25, "Building architecture")
+            check_cancelled()
             try:
                 raw = self.codex.run_structured(ARCHITECTURE_PROMPT.format(description=project["description"], goal=project["goal"], coverage=json.dumps(coverage)), self.settings.schema_dir / "architecture.json", root)
                 architecture = Architecture.model_validate(raw)
             except (CodexError, ValueError, json.JSONDecodeError) as exc:
+                check_cancelled()
                 ai_warnings.append(f"Architecture analysis used the deterministic fallback: {exc}")
                 architecture = heuristic_architecture(project, analysis)
+            check_cancelled()
             validate_evidence(architecture, capture["manifest"])
             changes = calculate_changes(previous, previous_snapshot, capture["manifest"], architecture, analysis)
             (root / "architecture.json").write_text(architecture.model_dump_json(indent=2), encoding="utf-8")
             progress(55, "Reviewing design and preparing lessons")
+            check_cancelled()
             try:
                 raw = self.codex.run_structured(CRITIQUE_PROMPT.format(goal=project["goal"], changes=json.dumps(changes)), self.settings.schema_dir / "critique.json", root)
                 critique = validate_critique_quality(Critique.model_validate(raw))
             except (CodexError, ValueError, json.JSONDecodeError) as exc:
+                check_cancelled()
                 ai_warnings.append(f"Critique used the deterministic fallback: {exc}")
                 critique = heuristic_critique(analysis)
             validate_evidence(critique, capture["manifest"])
-        review_stub = self.store.create_review(project_id, snapshot_id, previous["id"] if previous else None, "rendering", architecture.model_dump(), critique.model_dump(), changes, {})
+        check_cancelled()
+        quality = "limited" if ai_warnings or capture.get("coverage") == "limited" else "complete"
+        review_stub = self.store.create_review(
+            project_id, snapshot_id, previous["id"] if previous else None, "rendering",
+            architecture.model_dump(), critique.model_dump(), changes, {}, quality=quality,
+        )
         artifact_dir = self.settings.artifact_dir / project_id / review_stub
         progress(80, "Rendering architecture")
-        artifacts = render_diagram(self.settings, architecture, f"{project['name']} architecture", artifact_dir)
-        artifacts["ai_warnings"] = ai_warnings
-        if previous and previous["artifacts"].get("architecture_ir"):
-            comparison = render_comparison(self.settings, Path(previous["artifacts"]["architecture_ir"]), Path(artifacts["architecture_ir"]), artifact_dir / "comparison.html")
-            if comparison: artifacts["comparison"] = comparison
-        report_path = artifact_dir / "review.md"; artifact_dir.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(markdown_report(project, architecture, critique, changes), encoding="utf-8")
-        artifacts["report"] = str(report_path)
-        with self.store.connect() as conn:
-            conn.execute("UPDATE reviews SET status='complete', artifacts_json=? WHERE id=?", (json.dumps(artifacts), review_stub))
-        self.store.update_project(project_id, last_checked_at=utc_now()); progress(100, "Review complete")
+        try:
+            check_cancelled()
+            artifacts = render_diagram(
+                self.settings, architecture, f"{project['name']} architecture", artifact_dir,
+                cancelled=is_cancelled,
+            )
+            check_cancelled()
+            artifacts["ai_warnings"] = ai_warnings
+            if previous and previous["artifacts"].get("architecture_ir"):
+                comparison = render_comparison(
+                    self.settings, Path(previous["artifacts"]["architecture_ir"]),
+                    Path(artifacts["architecture_ir"]), artifact_dir / "comparison.html",
+                    cancelled=is_cancelled,
+                )
+                if comparison:
+                    artifacts["comparison"] = comparison
+            check_cancelled()
+            report_path = artifact_dir / "review.md"
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(markdown_report(project, architecture, critique, changes), encoding="utf-8")
+            artifacts["report"] = str(report_path)
+            check_cancelled()
+            self.store.finalize_review(
+                review_stub, project_id, artifacts, quality=quality, job_id=job_id,
+            )
+        except (ReviewCancelled, JobCancelledError, ProcessCancelled):
+            self.store.delete_unpublished_review(review_stub)
+            raise ReviewCancelled("Review cancelled before publication")
+        progress(100, "Review complete" if quality == "complete" else "Limited review saved")
         return review_stub
 
-    def chat(self, review_id: str, message: str) -> str:
+    def chat(
+        self,
+        review_id: str,
+        message: str,
+        *,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> str:
+        is_cancelled = cancelled or (lambda: False)
+        if is_cancelled():
+            raise ReviewCancelled("Chat cancelled")
         review = self.store.get_review(review_id); snapshot = self.store.get_snapshot(review["snapshot_id"]); conversation = self.store.conversation_for_review(review_id)
         self.store.add_message(conversation["id"], "user", message)
         history = "\n".join(f"{m['role']}: {m['content']}" for m in conversation["messages"][-10:])
@@ -201,11 +281,17 @@ class ReviewEngine:
             (root / "review-context.json").write_text(json.dumps({"architecture": review["architecture"], "critique": review["critique"], "changes": review["changes"]}, indent=2), encoding="utf-8")
             try:
                 response = ChatResponse.model_validate(self.codex.run_structured(CHAT_PROMPT.format(history=history, message=message), self.settings.schema_dir / "chat.json", root))
+                if is_cancelled():
+                    raise ReviewCancelled("Chat cancelled")
                 citations = validate_evidence_items(response.citations, snapshot["manifest"])
                 answer = response.answer
             except (CodexError, ValueError, KeyError, json.JSONDecodeError) as exc:
+                if is_cancelled():
+                    raise ReviewCancelled("Chat cancelled") from exc
                 answer = f"I could not run Codex for this question: {exc}. The saved review remains available."
                 citations = []
+        if is_cancelled():
+            raise ReviewCancelled("Chat cancelled")
         self.store.add_message(conversation["id"], "assistant", answer, [item.model_dump() for item in citations])
         return conversation["id"]
 

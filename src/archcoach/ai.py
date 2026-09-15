@@ -10,6 +10,7 @@ from typing import Callable
 
 from .config import Settings
 from .models import Architecture, Critique
+from .subprocesses import process_group_options, terminate_process_tree
 
 
 class CodexError(RuntimeError):
@@ -53,7 +54,11 @@ class CodexAdapter:
         handle.close()
         command = [self.settings.codex_command, "exec", "-", "--cd", str(cwd), "--sandbox", "read-only", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "-c", 'model_reasoning_effort="low"', "--output-schema", str(schema), "--output-last-message", str(output), "--json"]
         try:
-            self.current = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", env=self._env(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            self.current = subprocess.Popen(
+                command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding="utf-8", errors="replace", env=self._env(),
+                **process_group_options(),
+            )
             stdout, stderr = self.current.communicate(prompt, timeout=timeout)
             for line in stdout.splitlines():
                 try:
@@ -77,7 +82,7 @@ class CodexAdapter:
 
     def cancel(self) -> None:
         if self.current and self.current.poll() is None:
-            self.current.terminate()
+            terminate_process_tree(self.current)
 
 
 ARCHITECTURE_PROMPT = """You are documenting the architecture of a captured source snapshot. Read files only; never execute, import, install, or modify anything. Use static-analysis.json as a starting point and inspect source when needed.

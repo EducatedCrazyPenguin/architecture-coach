@@ -5,10 +5,12 @@ import json
 import os
 import subprocess
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 from .config import Settings
 from .models import Architecture
+from .subprocesses import run_cancellable
 
 
 def find_node() -> str | None:
@@ -36,7 +38,14 @@ def to_archify(architecture: Architecture, title: str) -> dict:
     return {"schema_version": 1, "diagram_type": "architecture", "meta": {"title": title, "visual_preset": "editorial", "quality_profile": "standard"}, "layout": {"mode": "grid", "cols": min(3, max(1, len(components))), "cellW": 330, "cellH": 155, "gapX": 28, "gapY": 28}, "components": components, "connections": connections}
 
 
-def render_diagram(settings: Settings, architecture: Architecture, title: str, output_dir: Path) -> dict:
+def render_diagram(
+    settings: Settings,
+    architecture: Architecture,
+    title: str,
+    output_dir: Path,
+    *,
+    cancelled: Callable[[], bool] | None = None,
+) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     ir_path = output_dir / "architecture.json"
     html_path = output_dir / "architecture.html"
@@ -47,7 +56,10 @@ def render_diagram(settings: Settings, architecture: Architecture, title: str, o
         env = os.environ.copy(); env["ARCHIFY_UPDATE_CHECK_DISABLED"] = "1"
         last_error = ""
         for _ in range(2):
-            result = subprocess.run([node, str(settings.archify_cli), "deliver", "architecture", str(ir_path), str(html_path), "--quality", "standard", "--json"], capture_output=True, text=True, env=env, timeout=120, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            result = run_cancellable(
+                [node, str(settings.archify_cli), "deliver", "architecture", str(ir_path), str(html_path), "--quality", "standard", "--json"],
+                timeout=120, cancelled=cancelled, env=env,
+            )
             if result.returncode == 0 and html_path.exists():
                 return {"diagram": str(html_path), "architecture_ir": str(ir_path), "renderer": "archify", "error": None}
             last_error = (result.stderr or result.stdout)[-2000:]
@@ -66,10 +78,20 @@ def fallback_diagram(architecture: Architecture, title: str, target: Path) -> No
     target.write_text(document, encoding="utf-8")
 
 
-def render_comparison(settings: Settings, base_ir: Path, head_ir: Path, target: Path) -> str | None:
+def render_comparison(
+    settings: Settings,
+    base_ir: Path,
+    head_ir: Path,
+    target: Path,
+    *,
+    cancelled: Callable[[], bool] | None = None,
+) -> str | None:
     node = find_node()
     if not settings.archify_cli.exists() or not node:
         return None
     env = os.environ.copy(); env["ARCHIFY_UPDATE_CHECK_DISABLED"] = "1"
-    result = subprocess.run([node, str(settings.archify_cli), "compare", "architecture", str(base_ir), str(head_ir), str(target), "--json"], capture_output=True, text=True, env=env, timeout=120, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    result = run_cancellable(
+        [node, str(settings.archify_cli), "compare", "architecture", str(base_ir), str(head_ir), str(target), "--json"],
+        timeout=120, cancelled=cancelled, env=env,
+    )
     return str(target) if result.returncode == 0 and target.exists() else None

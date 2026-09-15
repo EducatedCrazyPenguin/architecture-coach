@@ -7,10 +7,12 @@ import shutil
 import subprocess
 import tempfile
 from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
 
 from .capture import read_blob
 from .config import Settings
+from .subprocesses import ProcessCancelled, run_cancellable
 
 
 IMPORT_RE = re.compile(r"(?:import\s+(?:[^'\"]+?\s+from\s+)?|require\s*\()\s*['\"]([^'\"]+)['\"]")
@@ -24,7 +26,7 @@ def _node_command() -> str | None:
     return str(candidates[0]) if candidates else None
 
 
-def _typescript_analysis(settings: Settings, manifest: list[dict]) -> dict[str, dict]:
+def _typescript_analysis(settings: Settings, manifest: list[dict], cancelled: Callable[[], bool]) -> dict[str, dict]:
     node = _node_command(); helper = settings.app_dir.parent.parent / "tools" / "analyze-js.mjs"
     selected = [item for item in manifest if Path(item["path"]).suffix.lower() in {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}]
     if not node or not helper.exists() or not selected:
@@ -35,9 +37,11 @@ def _typescript_analysis(settings: Settings, manifest: list[dict]) -> dict[str, 
             target = root / item["path"]; target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(read_blob(settings, item["sha256"]))
             reverse[str(target)] = item["path"]; paths.append(str(target))
         try:
-            result = subprocess.run([node, str(helper), *paths], capture_output=True, text=True, timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            result = run_cancellable([node, str(helper), *paths], timeout=60, cancelled=cancelled)
             if result.returncode != 0: return {}
             return {reverse.get(item["file"], item["file"]): item for item in json.loads(result.stdout)}
+        except ProcessCancelled:
+            raise
         except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
             return {}
 
@@ -60,7 +64,8 @@ def _resolve_python_import(current: str, imported: str, module_names: set[str]) 
     return min(matches, key=len) if matches else None
 
 
-def analyze_snapshot(settings: Settings, manifest: list[dict]) -> dict:
+def analyze_snapshot(settings: Settings, manifest: list[dict], *, cancelled: Callable[[], bool] | None = None) -> dict:
+    is_cancelled = cancelled or (lambda: False)
     module_by_path = {item["path"]: _module_name(item["path"]) for item in manifest if item["path"].endswith((".py", ".pyi"))}
     module_names = set(module_by_path.values())
     files: list[dict] = []
@@ -68,8 +73,10 @@ def analyze_snapshot(settings: Settings, manifest: list[dict]) -> dict:
     unresolved: list[dict] = []
     omissions: list[str] = []
     language_counts: dict[str, int] = defaultdict(int)
-    typed_js = _typescript_analysis(settings, manifest)
+    typed_js = _typescript_analysis(settings, manifest, is_cancelled)
     for item in manifest:
+        if is_cancelled():
+            raise ProcessCancelled("Static analysis cancelled")
         path = item["path"]
         suffix = Path(path).suffix.lower()
         text = read_blob(settings, item["sha256"]).decode("utf-8", errors="replace")
