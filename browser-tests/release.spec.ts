@@ -97,8 +97,15 @@ test("project review, lesson, chat, settings, and comparison use saved evidence"
   await expect(page.getByRole("heading", { name: /synthetic service/ })).toBeVisible();
   await expect(page.getByText("The entry point is short")).toBeVisible();
   await expect(page.getByRole("link", { name: "main.py:1" }).first()).toBeVisible();
-  await page.getByLabel("Progress for Cohesion").selectOption("understood");
-  await expect(page.locator("#toast")).toContainText("Lesson progress saved");
+  await expect(page.getByRole("heading", { name: "Repository quiz" })).toBeVisible();
+  await expect(page.locator(".quiz-card")).toHaveCount(10);
+  const firstQuestion = page.locator(".quiz-card").first();
+  await firstQuestion.locator('.quiz-option[data-index="1"]').click();
+  await firstQuestion.getByRole("button", { name: "Check answer" }).click();
+  await expect(firstQuestion.getByText("Not quite", { exact: true })).toBeVisible();
+  await expect(firstQuestion.getByText(/Correct answer:/)).toBeVisible();
+  await page.reload();
+  await expect(page.locator(".quiz-card").first().getByText("Not quite", { exact: true })).toBeVisible();
 
   await page.locator("#chat textarea").fill("Who owns the greeting?");
   await page.getByRole("button", { name: "Ask the coach" }).click();

@@ -230,7 +230,8 @@ def test_saved_review_is_independent_of_live_folder_and_diagnostics(tmp_path: Pa
     report = client.get(f"/artifacts/{review_id}/report?download=true")
     assert report.status_code == 200
     assert "attachment" in report.headers["content-disposition"]
-    assert "Self-check:" in report.text
+    assert "## Repository quiz" in report.text
+    assert report.text.count("### ") >= 10
     current = client.get(f"/api/reviews/{review_id}/current-status")
     assert current.json()["status"] == "matches"
     blobs_after = sorted(path.relative_to(app.state.settings.blob_dir) for path in app.state.settings.blob_dir.rglob("*") if path.is_file())
@@ -240,3 +241,32 @@ def test_saved_review_is_independent_of_live_folder_and_diagnostics(tmp_path: Pa
     assert client.get(f"/reviews/{review_id}").status_code == 200
     unavailable = client.get(f"/api/reviews/{review_id}/current-status")
     assert unavailable.json()["status"] == "folder_unavailable"
+
+
+def test_repository_quiz_checks_explains_and_persists_answers(tmp_path: Path):
+    project = tmp_path / "project"; project.mkdir(); (project / "app.py").write_text("value = 1\n", encoding="utf-8")
+    app, client = make_client(tmp_path); token = app.state.csrf_token
+    created = client.post("/api/projects", headers={"X-ArchCoach-Token": token}, json={"path": str(project)}).json()
+    from archcoach.review import ReviewEngine
+    from tests.test_review import OfflineCodex
+    review_id = ReviewEngine(app.state.settings, app.state.store, OfflineCodex()).run(created["id"])
+    review = app.state.store.get_review(review_id)
+    assert len(review["critique"]["quiz"]) == 10
+    question = review["critique"]["quiz"][0]
+    wrong_index = next(index for index in range(4) if index != question["correct_index"])
+
+    denied = client.post(f"/reviews/{review_id}/quiz/{question['id']}", json={"selected_index": wrong_index})
+    assert denied.status_code == 403
+    result = client.post(
+        f"/reviews/{review_id}/quiz/{question['id']}",
+        headers={"X-ArchCoach-Token": token}, json={"selected_index": wrong_index},
+    )
+    assert result.status_code == 200
+    assert result.json()["correct"] is False
+    assert result.json()["explanation"] == question["explanations"][wrong_index]
+    assert result.json()["correct_answer"] == question["options"][question["correct_index"]]
+    assert app.state.store.quiz_answers(review_id)[question["id"]]["selected_index"] == wrong_index
+    page = client.get(f"/reviews/{review_id}")
+    assert 'id="quiz-answered">1</span>/10 answered' in page.text
+    assert 'id="quiz-score">0</span> correct' in page.text
+    assert question["explanations"][wrong_index] in page.text

@@ -25,6 +25,9 @@ def test_legacy_database_is_backed_up_and_migrated_without_data_loss(tmp_path: P
     assert store.get_review("r")["snapshot_id"] == "s"
     assert store.conversation_for_review("r")["messages"][0]["content"] == "hello"
     assert store.lesson_statuses("r") == {"lesson": "learning"}
+    saved_answer = store.save_quiz_answer("r", "question", 2, False)
+    assert saved_answer["correct"] is False
+    assert store.quiz_answers("r")["question"]["selected_index"] == 2
     assert store.list_history("p")[0]["history_type"] == "review"
     assert store.get_review("r")["quality"] == "legacy"
     assert store.get_review("r")["format_version"] == 1
@@ -44,3 +47,18 @@ def test_project_registration_uses_canonical_windows_identity(tmp_path: Path):
         assert "already registered" in str(exc)
     else:
         raise AssertionError("case-only duplicate registration was accepted")
+
+
+def test_version_three_database_adds_quiz_answers_transactionally(tmp_path: Path):
+    database = tmp_path / "archcoach.db"
+    Store(database)
+    with sqlite3.connect(database) as conn:
+        conn.execute("DROP TABLE quiz_answers")
+        conn.execute("PRAGMA user_version=3")
+
+    Store(database)
+
+    with sqlite3.connect(database) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='quiz_answers'").fetchone()
+    assert list((tmp_path / "backups").glob("archcoach-v3-*.db"))

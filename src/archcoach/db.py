@@ -58,10 +58,16 @@ CREATE TABLE IF NOT EXISTS lesson_progress (
   lesson_id TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL,
   PRIMARY KEY(review_id, lesson_id)
 );
+CREATE TABLE IF NOT EXISTS quiz_answers (
+  review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+  question_id TEXT NOT NULL, selected_index INTEGER NOT NULL,
+  correct INTEGER NOT NULL, answered_at TEXT NOT NULL,
+  PRIMARY KEY(review_id, question_id)
+);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);
 """
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 MIGRATION_2 = (
     "ALTER TABLE projects ADD COLUMN normalized_path TEXT",
     "ALTER TABLE projects ADD COLUMN last_attempted_at TEXT",
@@ -84,6 +90,9 @@ MIGRATION_2 = (
 MIGRATION_3 = (
     "CREATE UNIQUE INDEX jobs_one_active_review_idx ON jobs(project_id) WHERE operation='review' AND status IN ('queued','running')",
     "CREATE UNIQUE INDEX jobs_scheduled_occurrence_idx ON jobs(project_id,scheduled_for) WHERE source='schedule' AND scheduled_for IS NOT NULL",
+)
+MIGRATION_4 = (
+    "CREATE TABLE IF NOT EXISTS quiz_answers (review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, question_id TEXT NOT NULL, selected_index INTEGER NOT NULL, correct INTEGER NOT NULL, answered_at TEXT NOT NULL, PRIMARY KEY(review_id, question_id))",
 )
 
 
@@ -149,6 +158,17 @@ class Store:
                                 (utc_now(), row[0]),
                             )
                     for statement in MIGRATION_3:
+                        conn.execute(statement)
+                    conn.execute("PRAGMA user_version=3")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+                version = 3
+            if version == 3:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    for statement in MIGRATION_4:
                         conn.execute(statement)
                     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
                     conn.commit()
@@ -572,3 +592,23 @@ class Store:
         with self.connect() as conn:
             rows = conn.execute("SELECT lesson_id,status FROM lesson_progress WHERE review_id=?", (review_id,)).fetchall()
         return {row[0]: row[1] for row in rows}
+
+    def save_quiz_answer(self, review_id: str, question_id: str, selected_index: int, correct: bool) -> dict[str, Any]:
+        answered_at = utc_now()
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO quiz_answers VALUES(?,?,?,?,?) ON CONFLICT(review_id,question_id) DO UPDATE SET selected_index=excluded.selected_index,correct=excluded.correct,answered_at=excluded.answered_at",
+                (review_id, question_id, selected_index, int(correct), answered_at),
+            )
+        return {"question_id": question_id, "selected_index": selected_index, "correct": correct, "answered_at": answered_at}
+
+    def quiz_answers(self, review_id: str) -> dict[str, dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM quiz_answers WHERE review_id=?", (review_id,)).fetchall()
+        return {
+            row["question_id"]: {
+                "selected_index": row["selected_index"], "correct": bool(row["correct"]),
+                "answered_at": row["answered_at"],
+            }
+            for row in rows
+        }

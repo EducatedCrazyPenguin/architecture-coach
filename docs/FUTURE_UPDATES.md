@@ -31,3 +31,25 @@ This is primarily a presentation change. The existing snapshot-based chat storag
 - Citations still open source from the conversation's saved snapshot.
 - A newer review never silently replaces the panel's selected review.
 - Desktop and narrow-screen Playwright scenarios pass with keyboard-only operation.
+
+## LEARN-002 — Personal local learning library
+
+**Status:** proposed
+
+Build a private library from completed repository quizzes so concepts can be revised across projects without recapturing source.
+
+### Intended behaviour
+
+- Save concepts, cited examples, incorrect answers, and later corrections locally.
+- Offer spaced review sessions using evidence from the immutable review that created each question.
+- Group questions by concepts such as boundaries, coupling, data flow, testing, and dependency direction.
+- Keep private source excerpts inside `%LOCALAPPDATA%\ArchCoach`; export only when the user explicitly chooses a destination.
+- Work with either the Codex account provider or Ollama through Codex CLI.
+- Detect when a cited review is old and link to the newer project review without rewriting the original question.
+
+### Acceptance checks
+
+- A learner can open one revision queue spanning several projects.
+- Incorrect answers return later and understood concepts appear less often.
+- Every explanation identifies its originating project review and saved evidence.
+- Deleting a project removes its private library entries through existing database ownership rules.

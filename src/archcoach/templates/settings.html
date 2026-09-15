@@ -6,22 +6,24 @@
 </header>
 {% if saved %}<div class="notice success">Project settings saved. The next review will use the new goal and exclusions.</div>{% endif %}
 <section class="settings-status">
-  <article class="panel"><p class="eyebrow">Codex</p><h2>{{ 'Ready' if codex.authenticated else 'Needs attention' }}</h2><p>{{ codex.message }}</p><code>{{ codex.command }}</code></article>
+  <article class="panel"><p class="eyebrow">AI provider · {{ codex.provider }}</p><h2>{{ 'Ready' if codex.authenticated else 'Needs attention' }}</h2><p>{{ codex.message }}</p><code>{{ codex.command }}</code>{% if codex.models %}<p class="muted">Installed local models: {{ codex.models|join(', ') }}</p>{% endif %}</article>
   <article class="panel"><p class="eyebrow">Local storage</p><h2>Private on this computer</h2><p>Review snapshots, lessons, and conversations are stored here:</p><code>{{ data_dir }}</code></article>
 </section>
-<section class="section-head"><div><p class="eyebrow">Analysis</p><h2>Codex and review limits</h2></div><a class="secondary button-link" href="/settings?refresh=true">Refresh diagnostics</a></section>
+<section class="section-head"><div><p class="eyebrow">Analysis</p><h2>AI provider and review limits</h2></div><a class="secondary button-link" href="/settings?refresh=true">Refresh diagnostics</a></section>
 <form class="settings-card" method="post" action="/settings/application">
   <input type="hidden" name="_csrf" value="{{ csrf_token }}">
   <div class="settings-grid">
+    <label>AI provider<select name="ai_provider"><option value="codex" {{ 'selected' if app_settings.ai_provider == 'codex' }}>Codex account</option><option value="ollama" {{ 'selected' if app_settings.ai_provider == 'ollama' }}>Ollama through Codex CLI</option></select></label>
     <label class="wide">Codex executable<input name="codex_command" required value="{{ app_settings.codex_command }}"></label>
     <label>Model <span>blank uses Codex default</span><input name="codex_model" value="{{ app_settings.codex_model or '' }}"></label>
+    <label>Ollama model <span>exact installed name</span><input name="ollama_model" value="{{ app_settings.ollama_model or '' }}" placeholder="qwen3-coder:latest"></label>
     <label>Reasoning effort<select name="reasoning_effort"><option value="low" {{ 'selected' if app_settings.reasoning_effort == 'low' }}>Low</option><option value="medium" {{ 'selected' if app_settings.reasoning_effort == 'medium' }}>Medium</option><option value="high" {{ 'selected' if app_settings.reasoning_effort == 'high' }}>High</option><option value="xhigh" {{ 'selected' if app_settings.reasoning_effort == 'xhigh' }}>Extra high</option></select></label>
     <label>Seconds per Codex call<input type="number" min="30" max="1800" name="codex_call_timeout" value="{{ app_settings.codex_call_timeout }}"></label>
     <label>Seconds per review<input type="number" min="60" max="3600" name="review_timeout" value="{{ app_settings.review_timeout }}"></label>
     <label>Characters per source packet<input type="number" min="8000" max="96000" name="source_packet_chars" value="{{ app_settings.source_packet_chars }}"></label>
     <label>Source packets<input type="number" min="1" max="6" name="source_packet_limit" value="{{ app_settings.source_packet_limit }}"></label>
   </div>
-  <div class="settings-actions"><span class="muted">Changes apply to new jobs.</span><button class="primary" type="submit">Save analysis settings</button></div>
+  <div class="settings-actions"><span class="muted">Codex account mode reuses your saved login. Ollama mode stays local and uses Codex CLI as the constrained runner. Changes apply to new jobs.</span><button class="primary" type="submit">Save analysis settings</button></div>
 </form>
 <section class="section-head"><div><p class="eyebrow">Projects</p><h2>Goals and schedule</h2></div></section>
 {% for item in projects %}

@@ -9,6 +9,35 @@ document.addEventListener("DOMContentLoaded", () => {
     const response = await fetch(`/reviews/${select.dataset.review}/lessons/${select.dataset.lesson}`, {method:"POST", headers:{"Content-Type":"application/json","X-ArchCoach-Token":token}, body:JSON.stringify({status:select.value})});
     toast(response.ok ? "Lesson progress saved" : "Could not save progress");
   }));
+  document.querySelectorAll(".quiz-form").forEach(form => form.addEventListener("submit", async event => {
+    event.preventDefault();
+    const selected = form.querySelector('input[type="radio"]:checked');
+    if (!selected) { toast("Choose an answer first"); return; }
+    const response = await fetch(`/reviews/${form.dataset.review}/quiz/${form.dataset.question}`, {
+      method:"POST", headers:{"Content-Type":"application/json","X-ArchCoach-Token":token},
+      body:JSON.stringify({selected_index:Number(selected.value)})
+    });
+    if (!response.ok) { toast("Could not check this answer"); return; }
+    const result = await response.json();
+    const card = form.closest(".quiz-card");
+    card.querySelectorAll(".quiz-option").forEach(option => {
+      const index = Number(option.dataset.index);
+      option.classList.toggle("selected", index === result.selected_index);
+      option.classList.toggle("correct", index === result.correct_index);
+      option.classList.toggle("incorrect", index === result.selected_index && !result.correct);
+    });
+    const feedback = card.querySelector(".quiz-feedback");
+    feedback.className = `quiz-feedback visible ${result.correct ? "correct" : "incorrect"}`;
+    feedback.replaceChildren();
+    const heading = document.createElement("strong"); heading.textContent = result.correct ? "Correct" : "Not quite";
+    const explanation = document.createElement("p"); explanation.textContent = result.explanation;
+    feedback.append(heading, explanation);
+    if (!result.correct) { const answer = document.createElement("p"); const label = document.createElement("b"); label.textContent="Correct answer: "; answer.append(label, document.createTextNode(result.correct_answer)); feedback.append(answer); }
+    const answered = document.getElementById("quiz-answered"), score = document.getElementById("quiz-score");
+    if (answered) answered.textContent = document.querySelectorAll(".quiz-feedback.visible").length;
+    if (score) score.textContent = document.querySelectorAll(".quiz-feedback.visible.correct").length;
+    toast(result.correct ? "Correct answer" : "Answer explained");
+  }));
   const currentStatus = document.getElementById("current-file-status");
   if (currentStatus) fetch(`/api/reviews/${currentStatus.dataset.review}/current-status`).then(async response => {
     if (!response.ok) throw new Error("status check failed");

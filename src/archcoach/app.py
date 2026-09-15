@@ -21,7 +21,7 @@ from .ai import CodexAdapter
 from .config import Settings, merge_saved_settings
 from .db import Store
 from .diagram import render_selected_comparison
-from .models import AppSettingsUpdate, ChatRequest, LessonStatusRequest, ProjectCreate, ProjectUpdate
+from .models import AppSettingsUpdate, ChatRequest, LessonStatusRequest, ProjectCreate, ProjectUpdate, QuizAnswerRequest
 from .capture import CaptureError, fingerprint_project
 from .review import ReviewEngine, compare_saved_reviews, source_text, validate_comparison_records
 from .worker import Worker
@@ -123,7 +123,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             review = store.get_review(review_id); project = store.get_project(review["project_id"]); snapshot = store.get_snapshot(review["snapshot_id"])
         except KeyError: raise HTTPException(404)
         conversation = store.conversation_for_review(review_id)
-        return templates.TemplateResponse(request=request, name="review.html", context=context(request, page="review", project=project, review=review, snapshot=snapshot, lesson_statuses=store.lesson_statuses(review_id), conversation=conversation, current_status="checking"))
+        quiz_answers = store.quiz_answers(review_id)
+        return templates.TemplateResponse(request=request, name="review.html", context=context(request, page="review", project=project, review=review, snapshot=snapshot, lesson_statuses=store.lesson_statuses(review_id), quiz_answers=quiz_answers, quiz_score=sum(item["correct"] for item in quiz_answers.values()), conversation=conversation, current_status="checking"))
 
     def comparison(project_id: str, before_id: str | None, after_id: str | None):
         project = store.get_project(project_id)
@@ -240,6 +241,35 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         data = LessonStatusRequest.model_validate(await request.json())
         store.set_lesson_status(review_id, lesson_id, data.status)
         return {"ok": True}
+
+    @app.post("/reviews/{review_id}/quiz/{question_id}")
+    async def answer_quiz(review_id: str, question_id: str, request: Request):
+        require_local(request)
+        try:
+            review = store.get_review(review_id)
+        except KeyError:
+            raise HTTPException(404, "Review not found")
+        question = next(
+            (item for item in review.get("critique", {}).get("quiz", []) if item.get("id") == question_id),
+            None,
+        )
+        if question is None:
+            raise HTTPException(404, "Quiz question not found in this review")
+        try:
+            data = QuizAnswerRequest.model_validate(await request.json())
+        except ValidationError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if data.selected_index >= len(question["options"]):
+            raise HTTPException(422, "Selected option is outside this question")
+        correct_index = question["correct_index"]
+        correct = data.selected_index == correct_index
+        saved = store.save_quiz_answer(review_id, question_id, data.selected_index, correct)
+        return {
+            **saved,
+            "correct_index": correct_index,
+            "correct_answer": question["options"][correct_index],
+            "explanation": question["explanations"][data.selected_index],
+        }
 
     @app.get("/reviews/{review_id}/source")
     def evidence_source(review_id: str, path: str, line: int = 1):
@@ -381,8 +411,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     def update_application_settings(
         request: Request,
         csrf: str = Form(alias="_csrf"),
+        ai_provider: str = Form(default="codex"),
         codex_command: str = Form(),
         codex_model: str = Form(default=""),
+        ollama_model: str = Form(default=""),
         reasoning_effort: str = Form(default="low"),
         codex_call_timeout: int = Form(default=300),
         review_timeout: int = Form(default=900),
@@ -392,7 +424,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         require_local(request, csrf)
         try:
             apply_app_settings(AppSettingsUpdate(
-                codex_command=codex_command, codex_model=codex_model or None,
+                ai_provider=ai_provider, codex_command=codex_command,
+                codex_model=codex_model or None, ollama_model=ollama_model or None,
                 reasoning_effort=reasoning_effort, codex_call_timeout=codex_call_timeout,
                 review_timeout=review_timeout, source_packet_chars=source_packet_chars,
                 source_packet_limit=source_packet_limit,

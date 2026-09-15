@@ -15,6 +15,7 @@ from archcoach.ai import (
     CodexMalformedOutput,
     CodexTimeoutError,
     CodexUsageError,
+    find_codex,
 )
 from archcoach.config import Settings
 
@@ -108,3 +109,33 @@ def test_adapter_reports_incompatible_cli_instead_of_weakening_restrictions(tmp_
     monkeypatch.setenv("FAKE_CODEX_INCOMPATIBLE", "1")
     with pytest.raises(CodexIncompatible, match="missing flags"):
         codex.run_structured("x", SCHEMA_DIR / "chat.json", workspace)
+
+
+def test_windows_codex_app_bundle_is_discovered_when_path_is_narrow(tmp_path: Path, monkeypatch):
+    bundle = tmp_path / "OpenAI" / "Codex" / "bin" / "version"
+    bundle.mkdir(parents=True)
+    executable = bundle / "codex.exe"
+    executable.write_bytes(b"fixture")
+    monkeypatch.setattr("archcoach.ai.os.name", "nt")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr("archcoach.ai.shutil.which", lambda _command: None)
+
+    assert find_codex("codex") == str(executable.resolve())
+
+
+def test_ollama_provider_runs_through_restricted_codex_cli(tmp_path: Path, monkeypatch):
+    codex, workspace = adapter(tmp_path)
+    object.__setattr__(codex.settings, "ai_provider", "ollama")
+    object.__setattr__(codex.settings, "ollama_model", "fixture-model")
+    monkeypatch.setattr(codex, "_ollama_models", lambda: ["fixture-model"])
+    argv_file = tmp_path / "ollama-argv.json"
+    monkeypatch.setenv("FAKE_CODEX_ARGV_FILE", str(argv_file))
+    monkeypatch.setenv("FAKE_CODEX_RESULT", '{"answer":"local","citations":[]}')
+
+    result = codex.run_structured("saved source", SCHEMA_DIR / "chat.json", workspace)
+
+    args = json.loads(argv_file.read_text(encoding="utf-8"))
+    assert result["answer"] == "local"
+    assert args[args.index("--local-provider") + 1] == "ollama"
+    assert args[args.index("--model") + 1] == "fixture-model"
+    assert args[args.index("--sandbox") + 1] == "read-only"

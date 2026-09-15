@@ -23,7 +23,7 @@ if sys.argv[1:3] == ["exec", "--help"]:
     if os.environ.get("FAKE_CODEX_INCOMPATIBLE"):
         print("--json")
     else:
-        print("--sandbox --ephemeral --ignore-user-config --ignore-rules --output-schema --output-last-message --json --strict-config --disable")
+        print("--sandbox --ephemeral --ignore-user-config --ignore-rules --output-schema --output-last-message --json --strict-config --disable --oss --local-provider")
     raise SystemExit(0)
 if sys.argv[1:3] == ["features", "list"]:
     for feature in ("shell_tool", "apps", "hooks", "browser_use", "computer_use", "plugins", "skill_search", "web_search_request", "in_app_browser"):
@@ -75,6 +75,22 @@ if target:
     supplied = os.environ.get("FAKE_CODEX_RESULT")
     schema = Path(option("--output-schema") or "").name
     has_helper = "helper.py" in prompt
+    quiz = [
+        {
+            "id": f"fixture-{index}",
+            "question": f"Question {index}: which file owns the saved entry behavior?",
+            "options": ["main.py", "database.py", "browser.js", "deployment.yml"],
+            "correct_index": 0,
+            "explanations": [
+                "Correct. main.py contains the cited entry behavior.",
+                "database.py is not present in this saved snapshot.",
+                "browser.js is not present in this saved snapshot.",
+                "deployment.yml is not present in this saved snapshot.",
+            ],
+            "evidence": [{"path": "main.py", "line": 1, "end_line": 1, "label": "Saved entry", "valid": True}],
+        }
+        for index in range(1, 11)
+    ]
     defaults = {
         "architecture.json": json.dumps({
             "summary": "A small synthetic service used to verify the complete review flow.",
@@ -89,6 +105,7 @@ if target:
             "strengths": ["The entry point is short and its responsibility is visible."],
             "findings": [{"id": "separate-greeting", "severity": "low", "title": "Keep greeting logic cohesive", "observation": "The greeting is owned by the entry module.", "why_it_matters": "A clear owner makes future behavior easier to find.", "improvement": "Extract it only when another caller needs the same behavior.", "tradeoffs": "An early extraction would add a module without immediate value.", "evidence": [{"path": "main.py", "line": 1, "end_line": 1, "label": "Greeting entry", "valid": True}]}],
             "lessons": [{"id": "cohesion", "title": "Cohesion", "explanation": "Code that changes for the same reason usually belongs together.", "code_example": "def greet(): return 'hello'", "self_check": "When should this move to a helper?", "answer": "When a second responsibility or caller makes the boundary useful.", "exercise": "Name the reason this function is likely to change.", "evidence": [{"path": "main.py", "line": 1, "end_line": 1, "label": "Small cohesive example", "valid": True}]}],
+            "quiz": quiz,
         }),
         "chat.json": json.dumps({"answer": "The saved entry point owns the current greeting behavior.", "citations": [{"path": "main.py", "line": 1, "end_line": 1, "label": "Saved entry point", "valid": True}]}),
     }

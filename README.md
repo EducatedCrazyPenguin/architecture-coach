@@ -5,7 +5,7 @@ Architecture Coach is a private, local dashboard that turns your current project
 ## Install and start on Windows
 
 1. Double-click `install.cmd` once. It creates an isolated `.venv`, installs the pinned Python dependencies from `requirements.lock`, and installs the locked browser packages.
-2. Make sure `codex login status` succeeds in a normal terminal. Run `codex login` if needed.
+2. Architecture Coach automatically discovers the Codex CLI bundled with the Windows Codex app and reuses its saved login. You can instead select an installed Ollama model in **Settings** for local reasoning.
 3. Double-click `Start Architecture Coach.cmd`.
 4. Add a local project folder in the browser and run its first review. In File Explorer, open the project, click the address bar, and copy a path such as `C:\Users\you\Documents\my-project`. A GitHub URL is not a local folder; clone or download that repository first.
 
@@ -28,10 +28,10 @@ The app binds only to `127.0.0.1:8765`. Use **Exit app** in the sidebar to stop 
 - An interactive Archify architecture diagram.
 - Stable changes from the last successful review on the same Git branch.
 - Up to five practical findings with evidence, impact, a small improvement, and tradeoffs.
-- One to three lessons with a self-check and exercise.
+- A ten-question repository quiz with four choices, source evidence, saved progress, and an explanation for every selected answer.
 - A conversation tied to that immutable review snapshot.
 
-The app uses the saved Codex CLI login and runs review sessions read-only. If Codex is unavailable, it produces a clearly simpler deterministic review from static analysis so the workflow still completes. Reviews never run or import target project code.
+The app uses the saved Codex CLI login and runs review sessions read-only. On Windows it discovers the CLI included with the Codex desktop app even when the launcher has a narrower PATH. Ollama is supported through Codex CLI's local-provider mode; start Ollama, choose the exact installed model in Settings, and refresh diagnostics. If the selected provider is unavailable, the app produces a clearly simpler deterministic review from static analysis. Reviews never run or import target project code.
 
 ## Storage and privacy
 
@@ -41,7 +41,8 @@ Archify is vendored at commit `a07fa1d5b2a10cbea110c5a2be2817397a301cdc` under `
 
 ## Recovery and maintenance
 
-- **Codex login:** run `codex login status`, then `codex login` if the saved session expired. Use **Settings → Refresh diagnostics** before retrying a failed review.
+- **Codex login:** Architecture Coach discovers the Windows desktop app's bundled CLI. If its saved session expired, open Codex and sign in, then use **Settings → Refresh diagnostics** before retrying.
+- **Ollama:** start the Ollama app, select **Ollama through Codex CLI**, and refresh diagnostics. When exactly one local model is installed, Architecture Coach selects it automatically; otherwise enter the model's exact name.
 - **Git inspection:** Architecture Coach checks Git ignore rules before capture. It discovers Git from PATH, normal Git for Windows locations, and Codex's bundled runtime. If none is available for a Git repository, install Git for Windows and restart the app.
 - **Usage limits and timeouts:** the app pauses scheduled retries after these failures. Retry manually after the limit resets, or adjust the per-call and per-review limits in Settings.
 - **Interrupted work:** reopening the launcher marks work abandoned by the prior owning worker and queues one catch-up review when a project is overdue. Completed reviews remain available after a failed attempt.

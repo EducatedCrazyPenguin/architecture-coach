@@ -9,10 +9,12 @@ from pathlib import Path
 class Settings:
     data_dir: Path
     app_dir: Path
+    ai_provider: str = "codex"
     codex_command: str = "codex"
     host: str = "127.0.0.1"
     port: int = 8765
     codex_model: str | None = None
+    ollama_model: str | None = None
     reasoning_effort: str = "low"
     codex_call_timeout: int = 300
     review_timeout: int = 900

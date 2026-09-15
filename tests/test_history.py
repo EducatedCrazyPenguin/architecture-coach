@@ -10,6 +10,15 @@ from archcoach.models import ProjectCreate
 from archcoach.review import REVIEW_FORMAT_VERSION, ReviewEngine, validate_comparison_records
 
 
+def fixture_quiz():
+    return [{
+        "id": f"question-{index}", "question": f"What owns fixture value {index}?",
+        "options": ["app.py", "db.py", "web.js", "Nothing"], "correct_index": 0,
+        "explanations": ["app.py owns it.", "No database file exists.", "No web file exists.", "The value has an owner."],
+        "evidence": [{"path": "app.py", "line": 1, "end_line": None, "label": "Source", "valid": True}],
+    } for index in range(10)]
+
+
 class CompleteCodex:
     def run_structured(self, _prompt, schema, *_args, **_kwargs):
         if schema.name == "architecture.json":
@@ -31,6 +40,7 @@ class CompleteCodex:
                 "answer": "app.py", "exercise": "Name the boundary.",
                 "evidence": [{"path": "app.py", "line": 1, "end_line": None, "label": "Source", "valid": True}],
             }],
+            "quiz": fixture_quiz(),
         }
 
     def cancel(self):

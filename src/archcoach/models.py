@@ -99,20 +99,42 @@ class Lesson(BaseModel):
     evidence: list[Evidence] = Field(default_factory=list)
 
 
+class QuizQuestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]*$")
+    question: str = Field(min_length=1)
+    options: list[str] = Field(min_length=4, max_length=4)
+    correct_index: int = Field(ge=0, le=3)
+    explanations: list[str] = Field(min_length=4, max_length=4)
+    evidence: list[Evidence] = Field(min_length=1, max_length=3)
+
+    @model_validator(mode="after")
+    def option_explanations_align(self):
+        if len(self.options) != len(self.explanations):
+            raise ValueError("Each quiz option needs an explanation")
+        if len(set(self.options)) != len(self.options):
+            raise ValueError("Quiz options must be unique")
+        return self
+
+
 class Critique(BaseModel):
     model_config = ConfigDict(extra="forbid")
     strengths: list[str] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list, max_length=5)
-    lessons: list[Lesson] = Field(min_length=1, max_length=3)
+    lessons: list[Lesson] = Field(default_factory=list, max_length=3)
+    quiz: list[QuizQuestion] = Field(default_factory=list, max_length=10)
 
     @model_validator(mode="after")
     def identifiers_are_unique(self):
         finding_ids = [finding.id for finding in self.findings]
         lesson_ids = [lesson.id for lesson in self.lessons]
+        quiz_ids = [question.id for question in self.quiz]
         if len(finding_ids) != len(set(finding_ids)):
             raise ValueError("Finding IDs must be unique")
         if len(lesson_ids) != len(set(lesson_ids)):
             raise ValueError("Lesson IDs must be unique")
+        if len(quiz_ids) != len(set(quiz_ids)):
+            raise ValueError("Quiz question IDs must be unique")
         return self
 
 
@@ -171,8 +193,10 @@ class ProjectUpdate(BaseModel):
 
 
 class AppSettingsUpdate(BaseModel):
+    ai_provider: Literal["codex", "ollama"] | None = None
     codex_command: str | None = Field(default=None, min_length=1, max_length=500)
     codex_model: str | None = Field(default=None, max_length=120)
+    ollama_model: str | None = Field(default=None, max_length=120)
     reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None
     codex_call_timeout: int | None = Field(default=None, ge=30, le=1800)
     review_timeout: int | None = Field(default=None, ge=60, le=3600)
@@ -181,7 +205,7 @@ class AppSettingsUpdate(BaseModel):
 
     @model_validator(mode="after")
     def required_values_cannot_be_null(self):
-        nullable = {"codex_model"}
+        nullable = {"codex_model", "ollama_model"}
         invalid = sorted(
             field for field in self.model_fields_set
             if field not in nullable and getattr(self, field) is None
@@ -203,3 +227,7 @@ class ChatResponse(BaseModel):
 
 class LessonStatusRequest(BaseModel):
     status: Literal["unread", "learning", "understood"]
+
+
+class QuizAnswerRequest(BaseModel):
+    selected_index: int = Field(ge=0, le=3)
