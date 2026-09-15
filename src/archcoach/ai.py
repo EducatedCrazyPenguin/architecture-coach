@@ -204,33 +204,40 @@ class CodexAdapter:
         self.last_event_at = time.monotonic()
         stdout_queue: queue.Queue[str | None] = queue.Queue()
         stderr_lines: list[str] = []
+        input_errors: list[BaseException] = []
+        deadline = time.monotonic() + timeout
         try:
             self.current = subprocess.Popen(
                 command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding="utf-8", errors="replace", env=self._env(), bufsize=1,
                 **process_group_options(),
             )
-            assert self.current.stdin and self.current.stdout and self.current.stderr
-            self.current.stdin.write(prompt)
-            self.current.stdin.close()
+            process = self.current
+            assert process.stdin and process.stdout and process.stderr
 
             def read_stdout() -> None:
-                assert self.current and self.current.stdout
-                for line in self.current.stdout:
+                for line in process.stdout:
                     stdout_queue.put(line)
                 stdout_queue.put(None)
 
             def read_stderr() -> None:
-                assert self.current and self.current.stderr
-                stderr_lines.extend(self.current.stderr.readlines())
+                stderr_lines.extend(process.stderr.readlines())
+
+            def write_stdin() -> None:
+                try:
+                    process.stdin.write(prompt)
+                    process.stdin.close()
+                except (BrokenPipeError, OSError) as exc:
+                    input_errors.append(exc)
 
             stdout_thread = threading.Thread(target=read_stdout, daemon=True)
             stderr_thread = threading.Thread(target=read_stderr, daemon=True)
+            stdin_thread = threading.Thread(target=write_stdin, daemon=True)
             stdout_thread.start()
             stderr_thread.start()
-            deadline = time.monotonic() + timeout
+            stdin_thread.start()
             stream_finished = False
-            while not stream_finished or self.current.poll() is None:
+            while not stream_finished or process.poll() is None:
                 if cancelled and cancelled():
                     self.cancel()
                     raise CodexCancelledError("Codex request cancelled")
@@ -256,8 +263,11 @@ class CodexAdapter:
                     on_event(event)
             stdout_thread.join(2)
             stderr_thread.join(2)
-            if self.current.returncode != 0:
-                raise self._classify_failure("".join(stderr_lines), self.current.returncode)
+            stdin_thread.join(2)
+            if process.returncode != 0:
+                raise self._classify_failure("".join(stderr_lines), process.returncode)
+            if input_errors:
+                raise CodexError(f"Codex stopped accepting the request: {input_errors[0]}")
             try:
                 return json.loads(output.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
@@ -265,6 +275,8 @@ class CodexAdapter:
         except OSError as exc:
             raise CodexUnavailable(f"Codex could not be launched: {exc}") from exc
         finally:
+            if self.current and self.current.poll() is None:
+                terminate_process_tree(self.current)
             self.current = None
             try:
                 output.unlink(missing_ok=True)

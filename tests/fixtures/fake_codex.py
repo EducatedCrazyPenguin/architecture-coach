@@ -30,8 +30,17 @@ if sys.argv[1:3] == ["features", "list"]:
         print(f"{feature} stable true")
     raise SystemExit(0)
 
-prompt = sys.stdin.read()
 mode = os.environ.get("FAKE_CODEX_MODE", "success")
+if mode == "ignore_stdin":
+    pid_target = os.environ.get("FAKE_CODEX_PID_FILE")
+    if pid_target:
+        Path(pid_target).write_text(str(os.getpid()), encoding="utf-8")
+    event = json.dumps({"type": "fixture.output", "data": "x" * 4000})
+    for _ in range(400):
+        print(event, flush=True)
+    time.sleep(60)
+
+prompt = sys.stdin.read()
 for marker, selected in (
     ("FIXTURE_STALL", "stall"),
     ("FIXTURE_INVALID", "invalid"),

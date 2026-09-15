@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import time
 from pathlib import Path
 
@@ -76,6 +77,30 @@ def test_adapter_times_out_and_reaps_process(tmp_path: Path, monkeypatch):
     with pytest.raises(CodexTimeoutError):
         codex.run_structured("x", SCHEMA_DIR / "chat.json", workspace, timeout=1)
     assert codex.current is None
+
+
+def test_adapter_supervises_prompt_delivery_and_drains_output(tmp_path: Path, monkeypatch):
+    codex, workspace = adapter(tmp_path)
+    pid_file = tmp_path / "pid.txt"
+    monkeypatch.setenv("FAKE_CODEX_MODE", "ignore_stdin")
+    monkeypatch.setenv("FAKE_CODEX_PID_FILE", str(pid_file))
+    started = time.monotonic()
+
+    with pytest.raises(CodexTimeoutError):
+        codex.run_structured("x" * 4_000_000, SCHEMA_DIR / "chat.json", workspace, timeout=1)
+
+    assert time.monotonic() - started < 10
+    assert codex.current is None
+    pid = pid_file.read_text(encoding="utf-8")
+    if os.name == "nt":
+        processes = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+        assert f'"{pid}"' not in processes
+    else:
+        with pytest.raises(ProcessLookupError):
+            os.kill(int(pid), 0)
 
 
 def test_adapter_reports_incompatible_cli_instead_of_weakening_restrictions(tmp_path: Path, monkeypatch):

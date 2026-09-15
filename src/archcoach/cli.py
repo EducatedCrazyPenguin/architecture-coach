@@ -8,13 +8,14 @@ import time
 import urllib.error
 import urllib.request
 import webbrowser
+from dataclasses import replace
 from pathlib import Path
 
 import uvicorn
 
 from .ai import CodexAdapter
 from .app import create_app
-from .config import Settings
+from .config import Settings, merge_saved_settings
 from .db import Store
 from .models import ProjectCreate
 from .review import ReviewEngine
@@ -43,6 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv); settings = Settings.load(args.data_dir); settings.ensure_dirs(); store = Store(settings.db_path)
+    settings = merge_saved_settings(settings, store.get_app_settings())
     if args.command == "doctor":
         codex = CodexAdapter(settings); checks = {"data_directory": str(settings.data_dir), "data_writable": settings.data_dir.exists(), "codex": codex.status(), "node": find_node(), "archify": settings.archify_cli.exists(), "htmx": (settings.app_dir.parent.parent / "node_modules" / "htmx.org" / "dist" / "htmx.min.js").exists()}
         print(json.dumps(checks, indent=2))
@@ -87,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
             if not args.no_browser:
                 webbrowser.open(f"http://127.0.0.1:{args.port}")
             return 0
-        settings = Settings(data_dir=settings.data_dir, app_dir=settings.app_dir, port=args.port)
+        settings = replace(settings, port=args.port)
         app = create_app(settings)
         if not args.no_browser: threading.Timer(1, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}")).start()
         config = uvicorn.Config(app, host=settings.host, port=args.port, log_level="info"); server = uvicorn.Server(config)

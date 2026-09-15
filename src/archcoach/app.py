@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .ai import CodexAdapter
-from .config import Settings
+from .config import Settings, merge_saved_settings
 from .db import Store
 from .diagram import render_selected_comparison
 from .models import AppSettingsUpdate, ChatRequest, LessonStatusRequest, ProjectCreate, ProjectUpdate
@@ -31,7 +31,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     store = Store(settings.db_path)
     saved_settings = store.get_app_settings()
     allowed_setting_keys = set(AppSettingsUpdate.model_fields)
-    settings = replace(settings, **{key: value for key, value in saved_settings.items() if key in allowed_setting_keys})
+    settings = merge_saved_settings(settings, saved_settings)
     settings.ensure_dirs()
     codex = CodexAdapter(settings); engine = ReviewEngine(settings, store, codex); worker = Worker(store, engine)
     templates = Jinja2Templates(directory=str(settings.app_dir / "templates"))

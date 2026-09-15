@@ -138,6 +138,27 @@ def test_global_host_origin_and_csrf_protection(tmp_path: Path):
     assert query_only.status_code == 403
 
 
+def test_required_application_settings_reject_explicit_null(tmp_path: Path):
+    app, client = make_client(tmp_path)
+    token = app.state.csrf_token
+
+    response = client.patch(
+        "/api/settings",
+        headers={"X-ArchCoach-Token": token},
+        json={"codex_call_timeout": None},
+    )
+
+    assert response.status_code == 422
+    assert client.get("/api/settings").json()["codex_call_timeout"] == 300
+
+    reset_model = client.patch(
+        "/api/settings",
+        headers={"X-ArchCoach-Token": token},
+        json={"codex_model": None},
+    )
+    assert reset_model.status_code == 200
+
+
 def test_partial_updates_preserve_omitted_fields_and_settings(tmp_path: Path):
     project = tmp_path / "project"; project.mkdir()
     app, client = make_client(tmp_path); token = app.state.csrf_token

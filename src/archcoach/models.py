@@ -171,6 +171,17 @@ class AppSettingsUpdate(BaseModel):
     source_packet_chars: int | None = Field(default=None, ge=8000, le=96000)
     source_packet_limit: int | None = Field(default=None, ge=1, le=6)
 
+    @model_validator(mode="after")
+    def required_values_cannot_be_null(self):
+        nullable = {"codex_model"}
+        invalid = sorted(
+            field for field in self.model_fields_set
+            if field not in nullable and getattr(self, field) is None
+        )
+        if invalid:
+            raise ValueError("Settings cannot be null: " + ", ".join(invalid))
+        return self
+
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000)

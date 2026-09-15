@@ -264,12 +264,12 @@ def semantic_comparison(
     }
 
 
-def calculate_changes(previous: dict | None, previous_snapshot: dict | None, current_manifest: list[dict], architecture: Architecture, analysis: dict, identity_uncertainty: list[dict] | None = None) -> dict:
+def calculate_changes(previous: dict | None, previous_snapshot: dict | None, current_snapshot: dict, architecture: Architecture, identity_uncertainty: list[dict] | None = None) -> dict:
     if not previous:
-        return semantic_comparison(None, None, architecture, {"manifest": current_manifest, "analysis": analysis}, identity_uncertainty=identity_uncertainty)
+        return semantic_comparison(None, None, architecture, current_snapshot, identity_uncertainty=identity_uncertainty)
     return semantic_comparison(
         Architecture.model_validate(previous["architecture"]), previous_snapshot,
-        architecture, {"manifest": current_manifest, "analysis": analysis},
+        architecture, current_snapshot,
         identity_uncertainty=identity_uncertainty,
     )
 
@@ -440,7 +440,10 @@ class ReviewEngine:
                     architecture, capture["manifest"],
                 )
             changes = calculate_changes(
-                previous, previous_snapshot, capture["manifest"], architecture, analysis,
+                previous, previous_snapshot, {
+                    "manifest": capture["manifest"], "analysis": analysis,
+                    "git": capture["git"], "coverage": coverage,
+                }, architecture,
                 identity_uncertainty,
             )
             progress(55, "Reviewing design and preparing lessons")

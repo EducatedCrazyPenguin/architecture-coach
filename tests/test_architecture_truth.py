@@ -5,6 +5,7 @@ import pytest
 from archcoach.diagram import stable_positions, to_archify
 from archcoach.models import Architecture, Component, Critique, Evidence, Lesson, Relationship
 from archcoach.review import (
+    calculate_changes,
     heuristic_architecture,
     heuristic_critique,
     preserve_component_identity,
@@ -155,3 +156,16 @@ def test_semantic_comparison_discloses_branch_and_coverage_changes():
 
     assert changes["branches"] == {"before": "main", "after": "feature", "changed": True}
     assert changes["coverage"] == {"before": "standard", "after": "limited"}
+
+
+def test_automatic_comparison_uses_the_same_snapshot_context_as_saved_comparison():
+    architecture = Architecture(summary="x", components=[component("a", "a.py")])
+    before = {"manifest": [], "analysis": {"manifests": {}}, "git": {"branch": "main"}, "coverage": {"level": "standard"}}
+    after = {"manifest": [], "analysis": {"manifests": {}}, "git": {"branch": "feature"}, "coverage": {"level": "limited"}}
+    previous = {"architecture": architecture.model_dump()}
+
+    automatic = calculate_changes(previous, before, after, architecture)
+    selected = semantic_comparison(architecture, before, architecture, after)
+
+    assert automatic["branches"] == selected["branches"]
+    assert automatic["coverage"] == selected["coverage"]

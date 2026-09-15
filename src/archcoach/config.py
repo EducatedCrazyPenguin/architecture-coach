@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 
@@ -54,3 +54,11 @@ class Settings:
     def ensure_dirs(self) -> None:
         for path in (self.data_dir, self.blob_dir, self.artifact_dir, self.runtime_dir):
             path.mkdir(parents=True, exist_ok=True)
+
+
+def merge_saved_settings(settings: Settings, saved: dict) -> Settings:
+    """Apply the same validated persisted settings in the web app and CLI."""
+    from .models import AppSettingsUpdate
+
+    update = AppSettingsUpdate.model_validate(saved)
+    return replace(settings, **update.model_dump(exclude_unset=True))
