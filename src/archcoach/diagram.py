@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .config import Settings
 from .models import Architecture
-from .subprocesses import run_cancellable
+from .subprocesses import ProcessCancelled, run_cancellable
 
 
 def find_node() -> str | None:
@@ -56,10 +56,39 @@ def to_archify(architecture: Architecture, title: str, positions: dict | None = 
         })
     connections = []
     known = {component.id for component in architecture.components}
-    for relation in architecture.relationships:
+    principal = principal_relationships(architecture)
+    pair_counts: dict[tuple[str, str], int] = {}
+    for relation in principal:
         if relation.source in known and relation.target in known:
-            connections.append({"from": relation.source, "to": relation.target, "label": relation.label, "variant": "dashed" if relation.inferred else "default"})
+            pair = (relation.source, relation.target)
+            pair_counts[pair] = pair_counts.get(pair, 0) + 1
+            connections.append({
+                "id": f"rel-{relation.source}-{relation.target}-{pair_counts[pair]}",
+                "from": relation.source, "to": relation.target, "label": relation.label,
+                "variant": "dashed" if relation.inferred else "default",
+            })
     return {"schema_version": 1, "diagram_type": "architecture", "meta": {"title": title, "visual_preset": "editorial", "quality_profile": "standard"}, "layout": {"mode": "grid", "cols": min(3, max(1, len(components))), "cellW": 330, "cellH": 155, "gapX": 28, "gapY": 28}, "components": components, "connections": connections}
+
+
+def principal_relationships(architecture: Architecture) -> list:
+    """Keep the diagram readable while the report retains every dependency."""
+    path_edges = set(zip(architecture.main_path, architecture.main_path[1:]))
+    ordered = sorted(
+        architecture.relationships,
+        key=lambda item: ((item.source, item.target) not in path_edges, item.inferred, item.source, item.target, item.label),
+    )
+    return ordered[: max(12, len(architecture.components) - 1)]
+
+
+def _repair_layout(ir: dict) -> dict:
+    """Second-attempt repair changes geometry only; architecture facts stay intact."""
+    repaired = json.loads(json.dumps(ir))
+    count = len(repaired.get("components", []))
+    repaired["layout"].update({"cols": min(2, max(1, count)), "cellW": 370, "cellH": 175, "gapX": 42, "gapY": 42})
+    for component in repaired.get("components", []):
+        index = next(i for i, item in enumerate(repaired["components"]) if item["id"] == component["id"])
+        component["row"], component["col"] = divmod(index, repaired["layout"]["cols"])
+    return repaired
 
 
 def render_diagram(
@@ -80,18 +109,26 @@ def render_diagram(
     if settings.archify_cli.exists() and node:
         env = os.environ.copy(); env["ARCHIFY_UPDATE_CHECK_DISABLED"] = "1"
         last_error = ""
-        for _ in range(2):
-            result = run_cancellable(
-                [node, str(settings.archify_cli), "deliver", "architecture", str(ir_path), str(html_path), "--quality", "standard", "--json"],
-                timeout=120, cancelled=cancelled, env=env,
-            )
-            if result.returncode == 0 and html_path.exists():
-                return {"diagram": str(html_path), "architecture_ir": str(ir_path), "renderer": "archify", "error": None}
-            last_error = (result.stderr or result.stdout)[-2000:]
+        for attempt in range(2):
+            if attempt:
+                ir = _repair_layout(ir)
+                ir_path.write_text(json.dumps(ir, indent=2), encoding="utf-8")
+            try:
+                result = run_cancellable(
+                    [node, str(settings.archify_cli), "deliver", "architecture", str(ir_path), str(html_path), "--quality", "standard", "--json"],
+                    timeout=120, cancelled=cancelled, env=env,
+                )
+                if result.returncode == 0 and html_path.exists() and html_path.stat().st_size:
+                    return {"diagram": str(html_path), "architecture_ir": str(ir_path), "renderer": "archify", "error": None, "attempts": attempt + 1}
+                last_error = (result.stderr or result.stdout)[-2000:] or "Archify returned no valid HTML"
+            except ProcessCancelled:
+                raise
+            except (OSError, subprocess.SubprocessError) as exc:
+                last_error = f"{type(exc).__name__}: {exc}"
         fallback_diagram(architecture, title, html_path)
-        return {"diagram": str(html_path), "architecture_ir": str(ir_path), "renderer": "fallback", "error": last_error or "Archify rendering failed"}
+        return {"diagram": str(html_path), "architecture_ir": str(ir_path), "renderer": "fallback", "error": last_error or "Archify rendering failed", "attempts": 2}
     fallback_diagram(architecture, title, html_path)
-    return {"diagram": str(html_path), "architecture_ir": str(ir_path), "renderer": "fallback", "error": "Bundled Archify or Node.js was not found"}
+    return {"diagram": str(html_path), "architecture_ir": str(ir_path), "renderer": "fallback", "error": "Bundled Archify or Node.js was not found", "attempts": 0}
 
 
 def fallback_diagram(architecture: Architecture, title: str, target: Path) -> None:
@@ -115,8 +152,29 @@ def render_comparison(
     if not settings.archify_cli.exists() or not node:
         return None
     env = os.environ.copy(); env["ARCHIFY_UPDATE_CHECK_DISABLED"] = "1"
-    result = run_cancellable(
-        [node, str(settings.archify_cli), "compare", "architecture", str(base_ir), str(head_ir), str(target), "--json"],
-        timeout=120, cancelled=cancelled, env=env,
-    )
-    return str(target) if result.returncode == 0 and target.exists() else None
+    try:
+        result = run_cancellable(
+            [node, str(settings.archify_cli), "compare", "architecture", str(base_ir), str(head_ir), str(target), "--json"],
+            timeout=120, cancelled=cancelled, env=env,
+        )
+    except ProcessCancelled:
+        raise
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return str(target) if result.returncode == 0 and target.exists() and target.stat().st_size else None
+
+
+def render_selected_comparison(settings: Settings, before: dict, after: dict) -> str | None:
+    """Render a selected pair outside immutable review artifact directories."""
+    pair_dir = settings.artifact_dir / "comparisons" / before["project_id"] / f"{before['id']}-{after['id']}"
+    pair_dir.mkdir(parents=True, exist_ok=True)
+    base_ir = pair_dir / "before.json"
+    head_ir = pair_dir / "after.json"
+    target = pair_dir / "comparison.html"
+    if target.is_file() and target.stat().st_size:
+        return str(target)
+    before_model = Architecture.model_validate(before["architecture"])
+    after_model = Architecture.model_validate(after["architecture"])
+    base_ir.write_text(json.dumps(to_archify(before_model, "Earlier architecture", before.get("positions")), indent=2), encoding="utf-8")
+    head_ir.write_text(json.dumps(to_archify(after_model, "Later architecture", after.get("positions")), indent=2), encoding="utf-8")
+    return render_comparison(settings, base_ir, head_ir, target)

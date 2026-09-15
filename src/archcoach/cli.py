@@ -5,6 +5,8 @@ import json
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 import webbrowser
 from pathlib import Path
 
@@ -18,6 +20,14 @@ from .models import ProjectCreate
 from .review import ReviewEngine
 from .worker import Worker
 from .diagram import find_node
+
+
+def existing_server(port: int) -> bool:
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=0.75) as response:
+            return response.status == 200 and json.loads(response.read()).get("application") == "architecture-coach"
+    except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError):
+        return False
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,7 +45,9 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv); settings = Settings.load(args.data_dir); settings.ensure_dirs(); store = Store(settings.db_path)
     if args.command == "doctor":
         codex = CodexAdapter(settings); checks = {"data_directory": str(settings.data_dir), "data_writable": settings.data_dir.exists(), "codex": codex.status(), "node": find_node(), "archify": settings.archify_cli.exists(), "htmx": (settings.app_dir.parent.parent / "node_modules" / "htmx.org" / "dist" / "htmx.min.js").exists()}
-        print(json.dumps(checks, indent=2)); return 0 if checks["data_writable"] else 1
+        print(json.dumps(checks, indent=2))
+        required = checks["data_writable"] and checks["node"] and checks["archify"] and checks["htmx"]
+        return 0 if required else 1
     if args.command == "add":
         project = store.add_project(ProjectCreate(path=args.path, name=args.name, description=args.description, goal=args.goal)); print(f"Added {project['name']} ({project['id']})"); return 0
     if args.command == "review":
@@ -70,6 +82,11 @@ def main(argv: list[str] | None = None) -> int:
         print(job.get("error") or job["message"], file=sys.stderr)
         return 130 if job["status"] == "cancelled" else 1
     if args.command == "serve":
+        if existing_server(args.port):
+            print(f"Architecture Coach is already running on port {args.port}.")
+            if not args.no_browser:
+                webbrowser.open(f"http://127.0.0.1:{args.port}")
+            return 0
         settings = Settings(data_dir=settings.data_dir, app_dir=settings.app_dir, port=args.port)
         app = create_app(settings)
         if not args.no_browser: threading.Timer(1, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}")).start()

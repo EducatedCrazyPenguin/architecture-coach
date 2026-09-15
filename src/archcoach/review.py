@@ -491,7 +491,10 @@ class ReviewEngine:
             check_cancelled()
             report_path = artifact_dir / "review.md"
             artifact_dir.mkdir(parents=True, exist_ok=True)
-            report_path.write_text(markdown_report(project, architecture, critique, changes), encoding="utf-8")
+            report_path.write_text(
+                markdown_report(project, architecture, critique, changes, coverage, snapshot_id=snapshot_id),
+                encoding="utf-8",
+            )
             artifacts["report"] = str(report_path)
             check_cancelled()
             if job_id:
@@ -578,16 +581,69 @@ class ReviewEngine:
         return conversation["id"]
 
 
-def markdown_report(project: dict, architecture: Architecture, critique: Critique, changes: dict) -> str:
-    lines = [f"# {project['name']} architecture review", "", architecture.summary, "", "## Main path", "", " → ".join(architecture.main_path) or "No main path confirmed.", "", "## What changed", "", "Baseline review." if changes.get("baseline") else json.dumps(changes, indent=2), "", "## What works well", ""]
+def markdown_report(
+    project: dict,
+    architecture: Architecture,
+    critique: Critique,
+    changes: dict,
+    coverage: dict | None = None,
+    *,
+    snapshot_id: str = "",
+) -> str:
+    coverage = coverage or {}
+
+    def evidence_lines(items) -> list[str]:
+        if not items:
+            return ["- No source citation was supplied."]
+        return [
+            f"- `{item.path}:{item.line}{f'-{item.end_line}' if item.end_line else ''}`"
+            f" — {item.label or 'source evidence'}{' (unverified)' if not item.valid else ''}"
+            for item in items
+        ]
+
+    lines = [
+        f"# {project['name']} architecture review", "",
+        f"Snapshot: `{snapshot_id or 'legacy'}`", "", architecture.summary, "",
+        "## Main execution path", "", " → ".join(architecture.main_path) or "No runtime path was confirmed.", "",
+        "## How it is organised", "",
+    ]
+    for component in architecture.components:
+        lines += [f"### {component.name} ({component.kind})", "", component.responsibility, "", "Evidence:", *evidence_lines(component.sources), ""]
+    lines += ["## Supporting dependencies", ""]
+    if architecture.relationships:
+        lines.extend(
+            f"- `{item.source}` → `{item.target}`: {item.label}{' (inferred)' if item.inferred else ''}"
+            for item in architecture.relationships
+        )
+    else:
+        lines.append("No dependencies were confirmed.")
+    lines += ["", "## What changed", "", "Baseline review." if changes.get("baseline") else json.dumps(changes, indent=2), "", "## What works well", ""]
     lines.extend(f"- {item}" for item in critique.strengths)
+    if not critique.strengths:
+        lines.append("No source-backed strength claim was made.")
     lines += ["", "## What could improve", ""]
     for finding in critique.findings:
-        lines += [f"### {finding.severity.upper()}: {finding.title}", "", finding.observation, "", f"Why it matters: {finding.why_it_matters}", "", f"Smallest improvement: {finding.improvement}", "", f"Tradeoffs: {finding.tradeoffs}", ""]
-    if not critique.findings: lines += ["No justified architecture concerns were found.", ""]
+        lines += [
+            f"### {finding.severity.upper()}: {finding.title}", "", finding.observation, "",
+            f"Why it matters: {finding.why_it_matters}", "",
+            f"Smallest improvement: {finding.improvement}", "",
+            f"Tradeoffs: {finding.tradeoffs}", "", "Evidence:", *evidence_lines(finding.evidence), "",
+        ]
+    if not critique.findings:
+        lines += ["No justified architecture concerns were found.", ""]
     lines += ["## What to learn", ""]
-    for lesson in critique.lessons: lines += [f"### {lesson.title}", "", lesson.explanation, "", f"Exercise: {lesson.exercise}", ""]
-    return "\n".join(lines)
+    for lesson in critique.lessons:
+        lines += [
+            f"### {lesson.title}", "", lesson.explanation, "", "```", lesson.code_example, "```", "",
+            f"Self-check: {lesson.self_check}", "", f"Answer: {lesson.answer}", "",
+            f"Exercise: {lesson.exercise}", "", "Evidence:", *evidence_lines(lesson.evidence), "",
+        ]
+    lines += ["## Coverage and limitations", "", f"Coverage level: **{coverage.get('level', 'legacy or unavailable')}**", ""]
+    for omission in [*coverage.get("capture_omissions", []), *coverage.get("omissions", [])]:
+        lines.append(f"- {omission}")
+    if not coverage.get("capture_omissions") and not coverage.get("omissions"):
+        lines.append("- No capture or parser omission was recorded.")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def source_text(settings: Settings, snapshot: dict, relative_path: str) -> str:

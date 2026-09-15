@@ -4,7 +4,7 @@ Architecture Coach is a private, local dashboard that turns your current project
 
 ## Install and start on Windows
 
-1. Double-click `install.cmd` once.
+1. Double-click `install.cmd` once. It creates an isolated `.venv`, installs the pinned Python dependencies from `requirements.lock`, and installs the locked browser packages.
 2. Make sure `codex login status` succeeds in a normal terminal. Run `codex login` if needed.
 3. Double-click `Start Architecture Coach.cmd`.
 4. Add a local project folder in the browser and run its first review.
@@ -20,7 +20,7 @@ archcoach review "project name"
 archcoach serve
 ```
 
-The app binds only to `127.0.0.1:8765`. Use **Exit app** in the sidebar to stop the server and its review worker.
+The app binds only to `127.0.0.1:8765`. Use **Exit app** in the sidebar to stop the server and its review worker. Starting it a second time opens the existing server instead of creating another worker.
 
 ## What a review contains
 
@@ -39,11 +39,21 @@ The SQLite database, content-addressed source blobs, and exported artifacts live
 
 Archify is vendored at commit `a07fa1d5b2a10cbea110c5a2be2817397a301cdc` under `vendor/archify`; its update checks are disabled. Its MIT licence is retained in that directory.
 
+## Recovery and maintenance
+
+- **Codex login:** run `codex login status`, then `codex login` if the saved session expired. Use **Settings → Refresh diagnostics** before retrying a failed review.
+- **Usage limits and timeouts:** the app pauses scheduled retries after these failures. Retry manually after the limit resets, or adjust the per-call and per-review limits in Settings.
+- **Interrupted work:** reopening the launcher marks work abandoned by the prior owning worker and queues one catch-up review when a project is overdue. Completed reviews remain available after a failed attempt.
+- **Database migration:** startup applies transactional migrations automatically. Before changing an existing database, it copies the prior file to `%LOCALAPPDATA%\ArchCoach\backups`.
+- **Backup:** close the app, then copy the full `%LOCALAPPDATA%\ArchCoach` folder. Restore that folder while the app is stopped.
+- **Repair installation:** close the app and run `install.cmd` again. It reuses the checkout and isolated environment and stops with a clear error if Python 3.12, pnpm, Node, Archify, or local assets are unavailable.
+
 ## Development
 
 ```powershell
-python -m pip install -e ".[dev]"
-pnpm install
+python -m pip install -r requirements.lock
+python -m pip install -e . --no-deps --no-build-isolation
+pnpm install --frozen-lockfile
 pytest
 archcoach doctor
 ```

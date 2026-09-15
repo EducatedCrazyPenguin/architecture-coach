@@ -82,7 +82,7 @@ def test_project_settings_update_schedule_goal_and_exclusions(tmp_path: Path):
     assert form_saved["exclusions"] == ["reports/**", "cache/"]
 
 
-def test_review_history_can_compare_any_two_snapshots(tmp_path: Path):
+def test_review_history_can_compare_any_two_snapshots(tmp_path: Path, monkeypatch):
     project = tmp_path / "project"; project.mkdir()
     app_file = project / "app.py"; app_file.write_text("def main():\n    return 1\n", encoding="utf-8")
     app, client = make_client(tmp_path); token = app.state.csrf_token
@@ -110,6 +110,18 @@ def test_review_history_can_compare_any_two_snapshots(tmp_path: Path):
     assert page.status_code == 200
     assert "Compare two saved reviews" in page.text
     assert "services/auth.py" in page.text
+    def fake_selected(settings, _before, _after):
+        target = settings.artifact_dir / "comparisons" / "selected.html"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("<html>selected comparison</html>", encoding="utf-8")
+        return str(target)
+    monkeypatch.setattr("archcoach.app.render_selected_comparison", fake_selected)
+    visual = client.get(
+        f"/projects/{created['id']}/comparison-artifact",
+        params={"before": before, "after": after},
+    )
+    assert visual.status_code == 200
+    assert "sandbox allow-scripts" in visual.headers["content-security-policy"]
 
 
 def test_global_host_origin_and_csrf_protection(tmp_path: Path):
@@ -165,7 +177,7 @@ def test_api_errors_are_actionable_and_terminal_cancel_is_stable(tmp_path: Path)
 
 
 def test_saved_review_is_independent_of_live_folder_and_diagnostics(tmp_path: Path, monkeypatch):
-    project = tmp_path / "project"; project.mkdir(); (project / "app.py").write_text("x = 1\n", encoding="utf-8")
+    project = tmp_path / "project"; project.mkdir(); (project / "app.py").write_text("x = 1\n" * 501, encoding="utf-8")
     app, client = make_client(tmp_path); token = app.state.csrf_token
     created = client.post("/api/projects", headers={"X-ArchCoach-Token": token}, json={"path": str(project)}).json()
     from archcoach.review import ReviewEngine
@@ -178,6 +190,11 @@ def test_saved_review_is_independent_of_live_folder_and_diagnostics(tmp_path: Pa
     assert "Analysis coverage" in page.text
     assert 'sandbox="allow-scripts"' in page.text
     assert "Checking current files" in page.text
+    assert "Saved review:" in page.text
+    report = client.get(f"/artifacts/{review_id}/report?download=true")
+    assert report.status_code == 200
+    assert "attachment" in report.headers["content-disposition"]
+    assert "Self-check:" in report.text
     current = client.get(f"/api/reviews/{review_id}/current-status")
     assert current.json()["status"] == "matches"
     blobs_after = sorted(path.relative_to(app.state.settings.blob_dir) for path in app.state.settings.blob_dir.rglob("*") if path.is_file())

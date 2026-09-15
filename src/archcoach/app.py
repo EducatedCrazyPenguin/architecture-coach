@@ -19,6 +19,7 @@ from fastapi.templating import Jinja2Templates
 from .ai import CodexAdapter
 from .config import Settings
 from .db import Store
+from .diagram import render_selected_comparison
 from .models import AppSettingsUpdate, ChatRequest, LessonStatusRequest, ProjectCreate, ProjectUpdate
 from .capture import CaptureError, fingerprint_project
 from .review import ReviewEngine, compare_saved_reviews, source_text, validate_comparison_records
@@ -146,6 +147,19 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         except KeyError: raise HTTPException(404)
         return templates.TemplateResponse(request=request, name="compare.html", context=context(request, page="compare", project=project, reviews=reviews, before=before_review, after=after_review, changes=changes))
 
+    @app.get("/projects/{project_id}/comparison-artifact")
+    def selected_comparison_artifact(project_id: str, before: str, after: str):
+        try:
+            _, _, before_review, after_review, _ = comparison(project_id, before, after)
+            target = render_selected_comparison(app.state.settings, before_review, after_review)
+        except KeyError:
+            raise HTTPException(404)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        if not target:
+            raise HTTPException(503, "Archify comparison is unavailable; the semantic comparison remains below")
+        return FileResponse(target, headers={"Content-Security-Policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:"})
+
     @app.post("/projects")
     def add_project(request: Request, path: str = Form(), name: str = Form(default=""), description: str = Form(default=""), goal: str = Form(default=""), csrf: str = Form(alias="_csrf")):
         require_local(request, csrf)
@@ -235,7 +249,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return HTMLResponse(f"<!doctype html><title>{html.escape(path)}</title><style>body{{font:14px ui-monospace;background:#fafbfe;color:#182033;padding:24px}}pre{{white-space:pre-wrap}}.source-line{{display:block;scroll-margin-top:24px}}.source-line b{{color:#8a93a6;font-weight:400}}.source-line.selected{{background:#fff0a8}}</style><h1>{html.escape(path)}</h1><pre>{numbered}</pre><script>document.getElementById('L{line}')?.scrollIntoView()</script>")
 
     @app.get("/artifacts/{review_id}/{name}")
-    def artifact(review_id: str, name: str):
+    def artifact(review_id: str, name: str, download: bool = False):
         try: review = store.get_review(review_id)
         except KeyError: raise HTTPException(404)
         key = {"diagram": "diagram", "comparison": "comparison", "report": "report"}.get(name)
@@ -250,10 +264,13 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         headers = {}
         if target.suffix.lower() == ".html":
             headers["Content-Security-Policy"] = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:"
-        return FileResponse(target, headers=headers)
+        return FileResponse(target, headers=headers, filename=target.name if download else None)
 
     @app.get("/api/projects")
     def api_projects(): return store.list_projects()
+
+    @app.get("/api/health")
+    def api_health(): return {"application": "architecture-coach", "status": "ready"}
 
     @app.post("/api/projects", status_code=201)
     def api_add_project(data: ProjectCreate, request: Request):

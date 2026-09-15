@@ -2,7 +2,7 @@
 
 Starting commit: `f324046e8f7fc30e42b4a964446302b0103b9268`
 
-Verified: **32/40** · Implemented awaiting checks: **0** · In progress: **0** · Blocked: **0** · Remaining: **8**
+Verified: **36/40** · Implemented awaiting checks: **0** · In progress: **0** · Blocked: **0** · Remaining: **4**
 
 ## Phase A
 
@@ -62,10 +62,10 @@ Verified: **32/40** · Implemented awaiting checks: **0** · In progress: **0** 
 
 ## Phase I
 
-- [ ] **I1** Preserve reports when rendering fails — `todo`
-- [ ] **I2** Finish stable diagram delivery — `todo`
-- [ ] **I3** Complete exports and implementation tasks — `todo`
-- [ ] **I4** Make installation and launch dependable — `todo`
+- [x] **I1** Preserve reports when rendering fails — `verified`
+- [x] **I2** Finish stable diagram delivery — `verified`
+- [x] **I3** Complete exports and implementation tasks — `verified`
+- [x] **I4** Make installation and launch dependable — `verified`
 
 ## Phase J
 
