@@ -2,7 +2,7 @@
 
 Starting commit: `f324046e8f7fc30e42b4a964446302b0103b9268`
 
-Verified: **36/40** · Implemented awaiting checks: **0** · In progress: **0** · Blocked: **0** · Remaining: **4**
+Verified: **38/40** · Implemented awaiting checks: **0** · In progress: **1** · Blocked: **0** · Remaining: **2**
 
 ## Phase A
 
@@ -69,7 +69,7 @@ Verified: **36/40** · Implemented awaiting checks: **0** · In progress: **0** 
 
 ## Phase J
 
-- [ ] **J1** Add release regression and browser suites — `todo`
-- [ ] **J2** Run real project acceptance — `todo`
-- [ ] **J3** Perform self-review and lifecycle acceptance — `todo`
+- [x] **J1** Add release regression and browser suites — `verified`
+- [x] **J2** Run real project acceptance — `verified`
+- [ ] **J3** Perform self-review and lifecycle acceptance — `in_progress`
 - [ ] **J4** Publish verified release work — `todo`
