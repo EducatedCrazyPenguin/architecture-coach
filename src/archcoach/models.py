@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def utc_now() -> str:
@@ -18,6 +18,16 @@ class Evidence(BaseModel):
     label: str = ""
     valid: bool = True
 
+    @model_validator(mode="after")
+    def range_is_ordered(self):
+        if self.end_line is not None and self.end_line < self.line:
+            raise ValueError("Evidence end_line must be on or after line")
+        path = self.path.replace("\\", "/")
+        if not path or path.startswith("/") or ".." in path.split("/"):
+            raise ValueError("Evidence path must be snapshot-relative")
+        self.path = path
+        return self
+
 
 class Component(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -25,7 +35,8 @@ class Component(BaseModel):
     name: str
     kind: Literal["frontend", "backend", "database", "cloud", "security", "messagebus", "external"] = "backend"
     responsibility: str
-    sources: list[Evidence] = Field(default_factory=list, max_length=3)
+    sources: list[Evidence] = Field(default_factory=list, min_length=1, max_length=3)
+    source_paths: list[str] = Field(default_factory=list, max_length=250)
 
 
 class Relationship(BaseModel):
@@ -42,6 +53,25 @@ class Architecture(BaseModel):
     main_path: list[str] = Field(default_factory=list)
     components: list[Component]
     relationships: list[Relationship] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def references_are_valid(self):
+        identifiers = [component.id for component in self.components]
+        if len(identifiers) != len(set(identifiers)):
+            raise ValueError("Component IDs must be unique")
+        known = set(identifiers)
+        dangling_path = set(self.main_path) - known
+        dangling_relationships = {
+            identifier
+            for relationship in self.relationships
+            for identifier in (relationship.source, relationship.target)
+            if identifier not in known
+        }
+        if dangling_path:
+            raise ValueError(f"Main path has unknown component IDs: {sorted(dangling_path)}")
+        if dangling_relationships:
+            raise ValueError(f"Relationships have unknown component IDs: {sorted(dangling_relationships)}")
+        return self
 
 
 class Finding(BaseModel):
@@ -73,6 +103,16 @@ class Critique(BaseModel):
     strengths: list[str] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list, max_length=5)
     lessons: list[Lesson] = Field(min_length=1, max_length=3)
+
+    @model_validator(mode="after")
+    def identifiers_are_unique(self):
+        finding_ids = [finding.id for finding in self.findings]
+        lesson_ids = [lesson.id for lesson in self.lessons]
+        if len(finding_ids) != len(set(finding_ids)):
+            raise ValueError("Finding IDs must be unique")
+        if len(lesson_ids) != len(set(lesson_ids)):
+            raise ValueError("Lesson IDs must be unique")
+        return self
 
 
 class ProjectCreate(BaseModel):

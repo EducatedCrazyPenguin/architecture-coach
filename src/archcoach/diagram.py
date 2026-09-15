@@ -22,12 +22,36 @@ def find_node() -> str | None:
     return str(candidates[0]) if candidates else None
 
 
-def to_archify(architecture: Architecture, title: str) -> dict:
+def stable_positions(architecture: Architecture, previous: dict | None = None) -> dict[str, dict[str, int]]:
+    positions: dict[str, dict[str, int]] = {}
+    occupied: set[tuple[int, int]] = set()
+    for identifier in sorted(component.id for component in architecture.components):
+        candidate = (previous or {}).get(identifier)
+        if candidate and {"row", "col"} <= set(candidate):
+            location = (int(candidate["row"]), int(candidate["col"]))
+            if location not in occupied:
+                positions[identifier] = {"row": location[0], "col": location[1]}
+                occupied.add(location)
+    next_index = 0
+    for identifier in sorted(component.id for component in architecture.components):
+        if identifier in positions:
+            continue
+        while (next_index // 3, next_index % 3) in occupied:
+            next_index += 1
+        positions[identifier] = {"row": next_index // 3, "col": next_index % 3}
+        occupied.add((next_index // 3, next_index % 3))
+        next_index += 1
+    return positions
+
+
+def to_archify(architecture: Architecture, title: str, positions: dict | None = None) -> dict:
+    positions = positions or stable_positions(architecture)
     components = []
-    for index, component in enumerate(architecture.components):
+    for component in architecture.components:
+        position = positions[component.id]
         components.append({
             "id": component.id, "type": component.kind, "label": component.name[:28],
-            "sublabel": component.responsibility[:46], "row": index // 3, "col": index % 3,
+            "sublabel": component.responsibility[:46], "row": position["row"], "col": position["col"],
             "size": [280, 108],
         })
     connections = []
@@ -45,11 +69,12 @@ def render_diagram(
     output_dir: Path,
     *,
     cancelled: Callable[[], bool] | None = None,
+    positions: dict | None = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     ir_path = output_dir / "architecture.json"
     html_path = output_dir / "architecture.html"
-    ir = to_archify(architecture, title)
+    ir = to_archify(architecture, title, positions)
     ir_path.write_text(json.dumps(ir, indent=2), encoding="utf-8")
     node = find_node()
     if settings.archify_cli.exists() and node:

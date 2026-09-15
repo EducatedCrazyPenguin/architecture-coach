@@ -11,7 +11,7 @@
   },
   "$defs": {
     "evidence": {"type": "object", "additionalProperties": false, "required": ["path", "line", "end_line", "label", "valid"], "properties": {"path": {"type": "string"}, "line": {"type": "integer", "minimum": 1}, "end_line": {"type": ["integer", "null"], "minimum": 1}, "label": {"type": "string"}, "valid": {"type": "boolean"}}},
-    "component": {"type": "object", "additionalProperties": false, "required": ["id", "name", "kind", "responsibility", "sources"], "properties": {"id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"}, "name": {"type": "string"}, "kind": {"enum": ["frontend", "backend", "database", "cloud", "security", "messagebus", "external"]}, "responsibility": {"type": "string"}, "sources": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"$ref": "#/$defs/evidence"}}}},
+    "component": {"type": "object", "additionalProperties": false, "required": ["id", "name", "kind", "responsibility", "sources", "source_paths"], "properties": {"id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"}, "name": {"type": "string"}, "kind": {"enum": ["frontend", "backend", "database", "cloud", "security", "messagebus", "external"]}, "responsibility": {"type": "string"}, "sources": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"$ref": "#/$defs/evidence"}}, "source_paths": {"type": "array", "maxItems": 250, "items": {"type": "string"}}}},
     "relationship": {"type": "object", "additionalProperties": false, "required": ["source", "target", "label", "inferred"], "properties": {"source": {"type": "string"}, "target": {"type": "string"}, "label": {"type": "string"}, "inferred": {"type": "boolean"}}}
   }
 }

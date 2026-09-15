@@ -2,7 +2,7 @@
 
 Starting commit: `f324046e8f7fc30e42b4a964446302b0103b9268`
 
-Verified: **16/40** · Implemented awaiting checks: **0** · In progress: **0** · Blocked: **0** · Remaining: **24**
+Verified: **20/40** · Implemented awaiting checks: **0** · In progress: **0** · Blocked: **0** · Remaining: **20**
 
 ## Phase A
 
@@ -34,10 +34,10 @@ Verified: **16/40** · Implemented awaiting checks: **0** · In progress: **0** 
 
 ## Phase E
 
-- [ ] **E1** Centralise model validation — `todo`
-- [ ] **E2** Correct fallback teaching — `todo`
-- [ ] **E3** Persist component identity — `todo`
-- [ ] **E4** Use one semantic comparison engine — `todo`
+- [x] **E1** Centralise model validation — `verified`
+- [x] **E2** Correct fallback teaching — `verified`
+- [x] **E3** Persist component identity — `verified`
+- [x] **E4** Use one semantic comparison engine — `verified`
 
 ## Phase F
 

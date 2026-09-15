@@ -3,15 +3,16 @@ from __future__ import annotations
 import json
 import re
 import tempfile
+from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
 
 from .ai import ARCHITECTURE_PROMPT, CRITIQUE_PROMPT, CHAT_PROMPT, CodexAdapter, CodexError
-from .analyze import analyze_snapshot, compact_analysis
+from .analyze import analyze_snapshot, compact_analysis, manifest_changes
 from .capture import CaptureCancelled, capture_project, materialize_snapshot, read_blob
 from .config import Settings
 from .db import JobCancelledError, Store
-from .diagram import render_comparison, render_diagram
+from .diagram import render_comparison, render_diagram, stable_positions
 from .models import Architecture, ChatResponse, Component, Critique, Evidence, Finding, Lesson, Relationship, utc_now
 from .subprocesses import ProcessCancelled
 
@@ -46,7 +47,11 @@ def heuristic_architecture(project: dict, analysis: dict) -> Architecture:
         kinds = {f["language"] for f in files}
         kind = "frontend" if any(Path(f["path"]).suffix in {".tsx", ".jsx", ".html", ".css"} for f in files) else "database" if any("db" in f["path"].lower() or f["path"].endswith(".sql") for f in files) else "backend"
         responsibility = f"{len(files)} source file{'s' if len(files) != 1 else ''}; {', '.join(sorted(kinds))}"
-        components.append(Component(id=identifier, name=name, kind=kind, responsibility=responsibility, sources=[Evidence(path=sample["path"], line=1, label="Representative source")]))
+        components.append(Component(
+            id=identifier, name=name, kind=kind, responsibility=responsibility,
+            sources=[Evidence(path=sample["path"], line=1, label="Representative source")],
+            source_paths=sorted(file["path"] for file in files),
+        ))
         for file in files:
             path_to_id[file["path"]] = identifier
     relationships: list[Relationship] = []
@@ -55,13 +60,13 @@ def heuristic_architecture(project: dict, analysis: dict) -> Architecture:
         source, target = path_to_id.get(edge["source"]), path_to_id.get(edge["target"])
         if source and target and source != target and (source, target) not in seen:
             seen.add((source, target)); relationships.append(Relationship(source=source, target=target, label=edge["kind"], inferred=False))
-    summary = project.get("description") or f"{project['name']} contains {len(analysis['files'])} analysed source and documentation files."
-    main_path = [component.id for component in components[: min(4, len(components))]]
-    return Architecture(summary=summary, main_path=main_path, components=components, relationships=relationships)
+    description = project.get("description") or f"{project['name']} contains {len(analysis['files'])} analysed source and documentation files."
+    summary = f"{description} This limited static view confirms source dependencies; runtime execution order is unconfirmed."
+    return Architecture(summary=summary, main_path=[], components=components, relationships=relationships)
 
 
 def heuristic_critique(analysis: dict) -> Critique:
-    strengths = ["The project structure and dependencies were captured without executing project code."]
+    strengths: list[str] = []
     findings: list[Finding] = []
     lessons: list[Lesson] = []
     largest = sorted(analysis["files"], key=lambda f: f["lines"], reverse=True)
@@ -72,8 +77,9 @@ def heuristic_critique(analysis: dict) -> Critique:
         lessons.append(Lesson(id="cohesion", title="Cohesion and module boundaries", explanation="A cohesive module contains code that changes for the same reason.", code_example=f"# Start by listing the responsibilities in {file['path']}", self_check="Which functions in this module usually change together?", answer="Functions that serve the same responsibility are candidates to remain together.", exercise="Name the module's responsibilities before proposing any split.", evidence=evidence))
     if analysis["cycles"]:
         cycle = analysis["cycles"][0]
-        evidence = [Evidence(path=cycle[0], line=1, label="Dependency cycle")]
-        findings.append(Finding(id="dependency-cycle", severity="high", title="Modules form a dependency cycle", observation=" → ".join(cycle), why_it_matters="Cycles make initialization, testing, and isolated change harder.", improvement="Move the shared contract or data type to a lower-level module.", tradeoffs="A new shared module is only useful when the shared responsibility is clear.", evidence=evidence))
+        matching_edge = next((edge for edge in analysis["edges"] if edge["source"] == cycle[0] and edge["target"] == cycle[1]), None)
+        evidence = [Evidence(path=cycle[0], line=(matching_edge or {}).get("line", 1), label="Static dependency-cycle edge")]
+        findings.append(Finding(id="dependency-cycle", severity="high", title="Modules form a dependency cycle", observation="Static import analysis found: " + " → ".join(cycle), why_it_matters="Cycles can make initialization, testing, and isolated change harder; runtime impact remains an inference until exercised.", improvement="Inspect the cited import edge and move a shared contract only if both modules truly need it.", tradeoffs="A new shared module is only useful when the shared responsibility is clear.", evidence=evidence))
     if not lessons:
         sample = analysis["files"][0] if analysis["files"] else {"path": "README.md"}
         lessons.append(Lesson(id="boundaries", title="Architectural boundaries", explanation="A boundary groups code with one responsibility and controls what crosses into it.", code_example=f"# Inspect the imports entering {sample['path']}", self_check="What would callers need if this module were replaced?", answer="That minimum set of behavior is the module's practical interface.", exercise="Write one sentence describing what this module owns.", evidence=[Evidence(path=sample["path"], line=1)] if analysis["files"] else []))
@@ -85,15 +91,32 @@ def validate_evidence(model, manifest: list[dict]):
     for collection in (getattr(model, "components", []), getattr(model, "findings", []), getattr(model, "lessons", [])):
         for item in collection:
             for evidence in item.sources if hasattr(item, "sources") else item.evidence:
-                evidence.valid = evidence.path in lines and 1 <= evidence.line <= max(1, lines.get(evidence.path, 0)) and (evidence.end_line is None or evidence.end_line <= max(1, lines.get(evidence.path, 0)))
+                actual = lines.get(evidence.path, 0)
+                evidence.valid = evidence.path in lines and 1 <= evidence.line <= actual and (
+                    evidence.end_line is None or evidence.line <= evidence.end_line <= actual
+                )
+            if hasattr(item, "source_paths"):
+                item.source_paths = sorted(set(item.source_paths))
     return model
+
+
+def validate_architecture_snapshot(architecture: Architecture, manifest: list[dict]) -> Architecture:
+    known = {item["path"] for item in manifest}
+    invalid_membership = sorted({
+        path for component in architecture.components for path in component.source_paths if path not in known
+    })
+    if invalid_membership:
+        raise ValueError(f"Component membership refers to files outside the snapshot: {invalid_membership}")
+    return validate_evidence(architecture, manifest)
 
 
 def validate_evidence_items(items: list[Evidence], manifest: list[dict]) -> list[Evidence]:
     lines = {item["path"]: item["lines"] for item in manifest}
     for evidence in items:
-        last_line = max(1, lines.get(evidence.path, 0))
-        evidence.valid = evidence.path in lines and 1 <= evidence.line <= last_line and (evidence.end_line is None or evidence.end_line <= last_line)
+        last_line = lines.get(evidence.path, 0)
+        evidence.valid = evidence.path in lines and 1 <= evidence.line <= last_line and (
+            evidence.end_line is None or evidence.line <= evidence.end_line <= last_line
+        )
     return items
 
 
@@ -104,36 +127,125 @@ def validate_critique_quality(critique: Critique) -> Critique:
     return critique
 
 
-def calculate_changes(previous: dict | None, previous_snapshot: dict | None, current_manifest: list[dict], architecture: Architecture, analysis: dict) -> dict:
-    if not previous:
-        return {"baseline": True, "components_added": [c.id for c in architecture.components], "components_removed": [], "components_changed": [], "relationships_added": [], "relationships_removed": [], "files_added": [item["path"] for item in current_manifest], "files_removed": [], "files_changed": []}
-    before = Architecture.model_validate(previous["architecture"])
-    before_components = {c.id: c.model_dump() for c in before.components}; after_components = {c.id: c.model_dump() for c in architecture.components}
-    before_rel = {(r.source, r.target, r.label) for r in before.relationships}; after_rel = {(r.source, r.target, r.label) for r in architecture.relationships}
-    old_files = {item["path"]: item["sha256"] for item in (previous_snapshot or {}).get("manifest", [])}; new_files = {item["path"]: item["sha256"] for item in current_manifest}
-    return {"baseline": False, "components_added": sorted(after_components.keys() - before_components.keys()), "components_removed": sorted(before_components.keys() - after_components.keys()), "components_changed": sorted(k for k in before_components.keys() & after_components.keys() if before_components[k] != after_components[k]), "relationships_added": sorted(list(after_rel - before_rel)), "relationships_removed": sorted(list(before_rel - after_rel)), "files_added": sorted(new_files.keys() - old_files.keys()), "files_removed": sorted(old_files.keys() - new_files.keys()), "files_changed": sorted(k for k in new_files.keys() & old_files.keys() if new_files[k] != old_files[k])}
+def _membership(component: Component) -> tuple[str, ...]:
+    return tuple(sorted(set(component.source_paths or [source.path for source in component.sources])))
 
 
-def compare_saved_reviews(before: dict, before_snapshot: dict, after: dict, after_snapshot: dict) -> dict:
-    before_architecture = Architecture.model_validate(before["architecture"])
-    after_architecture = Architecture.model_validate(after["architecture"])
-    before_components = {item.id: item.model_dump() for item in before_architecture.components}
-    after_components = {item.id: item.model_dump() for item in after_architecture.components}
-    before_relationships = {(item.source, item.target, item.label) for item in before_architecture.relationships}
-    after_relationships = {(item.source, item.target, item.label) for item in after_architecture.relationships}
-    before_files = {item["path"]: item["sha256"] for item in before_snapshot["manifest"]}
-    after_files = {item["path"]: item["sha256"] for item in after_snapshot["manifest"]}
+def preserve_component_identity(
+    previous: Architecture,
+    previous_manifest: list[dict],
+    current: Architecture,
+    current_manifest: list[dict],
+) -> tuple[Architecture, list[dict]]:
+    old_hashes = {item["path"]: item["sha256"] for item in previous_manifest}
+    new_hashes = {item["path"]: item["sha256"] for item in current_manifest}
+    old_anchors = {
+        component.id: ({*(_membership(component))}, {old_hashes[path] for path in _membership(component) if path in old_hashes})
+        for component in previous.components
+    }
+    candidates: dict[str, list[str]] = {}
+    uncertainty: list[dict] = []
+    for component in current.components:
+        paths = set(_membership(component))
+        hashes = {new_hashes[path] for path in paths if path in new_hashes}
+        matches = [
+            identifier for identifier, (old_paths, old_content) in old_anchors.items()
+            if paths & old_paths or hashes & old_content
+        ]
+        candidates[component.id] = sorted(matches)
+        if len(matches) > 1:
+            matched_path_sets = [old_anchors[identifier][0] for identifier in matches]
+            disjoint = all(
+                not matched_path_sets[left] & matched_path_sets[right]
+                for left in range(len(matched_path_sets)) for right in range(left + 1, len(matched_path_sets))
+            )
+            uncertainty.append({
+                "type": "merge" if disjoint else "ambiguous",
+                "component": component.id,
+                "candidates": sorted(matches),
+            })
+    reverse: dict[str, list[str]] = defaultdict(list)
+    for current_id, matches in candidates.items():
+        if len(matches) == 1:
+            reverse[matches[0]].append(current_id)
+    for old_id, matches in reverse.items():
+        if len(matches) > 1:
+            uncertainty.append({"type": "split", "component": old_id, "candidates": sorted(matches)})
+    rename = {
+        current_id: matches[0]
+        for current_id, matches in candidates.items()
+        if len(matches) == 1 and len(reverse[matches[0]]) == 1
+    }
+    occupied = {component.id for component in current.components}
+    rename = {new: old for new, old in rename.items() if old == new or old not in occupied}
+    for component in current.components:
+        component.id = rename.get(component.id, component.id)
+    for relationship in current.relationships:
+        relationship.source = rename.get(relationship.source, relationship.source)
+        relationship.target = rename.get(relationship.target, relationship.target)
+    current.main_path = [rename.get(identifier, identifier) for identifier in current.main_path]
+    return Architecture.model_validate(current.model_dump()), uncertainty
+
+
+def semantic_comparison(
+    before: Architecture | None,
+    before_snapshot: dict | None,
+    after: Architecture,
+    after_snapshot: dict,
+    *,
+    identity_uncertainty: list[dict] | None = None,
+) -> dict:
+    current_manifest = after_snapshot.get("manifest", [])
+    if before is None:
+        return {
+            "baseline": True, "components_added": sorted(c.id for c in after.components),
+            "components_removed": [], "components_changed": [], "relationships_added": [],
+            "relationships_removed": [], "inferred_relationships_added": [],
+            "inferred_relationships_removed": [], "files_added": sorted(item["path"] for item in current_manifest),
+            "files_removed": [], "files_changed": [], "manifest_changes": manifest_changes({}, after_snapshot.get("analysis", {}).get("manifests", {})),
+            "identity_uncertainty": identity_uncertainty or [],
+        }
+    before_components = {component.id: (component.kind, _membership(component)) for component in before.components}
+    after_components = {component.id: (component.kind, _membership(component)) for component in after.components}
+    confirmed_before = {(r.source, r.target) for r in before.relationships if not r.inferred}
+    confirmed_after = {(r.source, r.target) for r in after.relationships if not r.inferred}
+    inferred_before = {(r.source, r.target) for r in before.relationships if r.inferred}
+    inferred_after = {(r.source, r.target) for r in after.relationships if r.inferred}
+    old_files = {item["path"]: item["sha256"] for item in (before_snapshot or {}).get("manifest", [])}
+    new_files = {item["path"]: item["sha256"] for item in current_manifest}
     return {
         "baseline": False,
         "components_added": sorted(after_components.keys() - before_components.keys()),
         "components_removed": sorted(before_components.keys() - after_components.keys()),
         "components_changed": sorted(key for key in before_components.keys() & after_components.keys() if before_components[key] != after_components[key]),
-        "relationships_added": sorted(after_relationships - before_relationships),
-        "relationships_removed": sorted(before_relationships - after_relationships),
-        "files_added": sorted(after_files.keys() - before_files.keys()),
-        "files_removed": sorted(before_files.keys() - after_files.keys()),
-        "files_changed": sorted(key for key in before_files.keys() & after_files.keys() if before_files[key] != after_files[key]),
+        "relationships_added": sorted(confirmed_after - confirmed_before),
+        "relationships_removed": sorted(confirmed_before - confirmed_after),
+        "inferred_relationships_added": sorted(inferred_after - inferred_before),
+        "inferred_relationships_removed": sorted(inferred_before - inferred_after),
+        "files_added": sorted(new_files.keys() - old_files.keys()),
+        "files_removed": sorted(old_files.keys() - new_files.keys()),
+        "files_changed": sorted(key for key in new_files.keys() & old_files.keys() if new_files[key] != old_files[key]),
+        "manifest_changes": manifest_changes((before_snapshot or {}).get("analysis", {}).get("manifests", {}), after_snapshot.get("analysis", {}).get("manifests", {})),
+        "identity_uncertainty": identity_uncertainty or [],
     }
+
+
+def calculate_changes(previous: dict | None, previous_snapshot: dict | None, current_manifest: list[dict], architecture: Architecture, analysis: dict, identity_uncertainty: list[dict] | None = None) -> dict:
+    if not previous:
+        return semantic_comparison(None, None, architecture, {"manifest": current_manifest, "analysis": analysis}, identity_uncertainty=identity_uncertainty)
+    return semantic_comparison(
+        Architecture.model_validate(previous["architecture"]), previous_snapshot,
+        architecture, {"manifest": current_manifest, "analysis": analysis},
+        identity_uncertainty=identity_uncertainty,
+    )
+
+
+def compare_saved_reviews(before: dict, before_snapshot: dict, after: dict, after_snapshot: dict) -> dict:
+    return semantic_comparison(
+        Architecture.model_validate(before["architecture"]), before_snapshot,
+        Architecture.model_validate(after["architecture"]), after_snapshot,
+        identity_uncertainty=after.get("changes", {}).get("identity_uncertainty", []),
+    )
 
 
 class ReviewEngine:
@@ -205,14 +317,23 @@ class ReviewEngine:
             check_cancelled()
             try:
                 raw = self.codex.run_structured(ARCHITECTURE_PROMPT.format(description=project["description"], goal=project["goal"], coverage=json.dumps(coverage)), self.settings.schema_dir / "architecture.json", root)
-                architecture = Architecture.model_validate(raw)
+                architecture = validate_architecture_snapshot(Architecture.model_validate(raw), capture["manifest"])
             except (CodexError, ValueError, json.JSONDecodeError) as exc:
                 check_cancelled()
                 ai_warnings.append(f"Architecture analysis used the deterministic fallback: {exc}")
                 architecture = heuristic_architecture(project, analysis)
             check_cancelled()
-            validate_evidence(architecture, capture["manifest"])
-            changes = calculate_changes(previous, previous_snapshot, capture["manifest"], architecture, analysis)
+            validate_architecture_snapshot(architecture, capture["manifest"])
+            identity_uncertainty: list[dict] = []
+            if previous and previous_snapshot:
+                architecture, identity_uncertainty = preserve_component_identity(
+                    Architecture.model_validate(previous["architecture"]), previous_snapshot["manifest"],
+                    architecture, capture["manifest"],
+                )
+            changes = calculate_changes(
+                previous, previous_snapshot, capture["manifest"], architecture, analysis,
+                identity_uncertainty,
+            )
             (root / "architecture.json").write_text(architecture.model_dump_json(indent=2), encoding="utf-8")
             progress(55, "Reviewing design and preparing lessons")
             check_cancelled()
@@ -226,9 +347,11 @@ class ReviewEngine:
             validate_evidence(critique, capture["manifest"])
         check_cancelled()
         quality = "limited" if ai_warnings or capture.get("coverage") == "limited" else "complete"
+        positions = stable_positions(architecture, previous.get("positions") if previous else None)
         review_stub = self.store.create_review(
             project_id, snapshot_id, previous["id"] if previous else None, "rendering",
             architecture.model_dump(), critique.model_dump(), changes, {}, quality=quality,
+            positions=positions,
         )
         artifact_dir = self.settings.artifact_dir / project_id / review_stub
         progress(80, "Rendering architecture")
@@ -236,7 +359,7 @@ class ReviewEngine:
             check_cancelled()
             artifacts = render_diagram(
                 self.settings, architecture, f"{project['name']} architecture", artifact_dir,
-                cancelled=is_cancelled,
+                cancelled=is_cancelled, positions=positions,
             )
             check_cancelled()
             artifacts["ai_warnings"] = ai_warnings
