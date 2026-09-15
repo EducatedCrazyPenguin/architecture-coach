@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from archcoach.config import Settings
-from archcoach.diagram import principal_relationships, render_diagram, render_selected_comparison
+from archcoach.diagram import fallback_diagram, principal_relationships, render_diagram, render_selected_comparison
 from archcoach.models import Architecture, Component, Critique, Evidence, Finding, Lesson, Relationship
 from archcoach.review import markdown_report
 from archcoach.cli import existing_server
@@ -50,6 +50,37 @@ def test_renderer_timeout_repairs_layout_then_preserves_fallback(tmp_path: Path,
     assert attempts[0]["connections"] == attempts[1]["connections"]
     assert attempts[0]["components"][0]["id"] == attempts[1]["components"][0]["id"]
     assert attempts[0]["layout"] != attempts[1]["layout"]
+
+
+def test_fallback_is_an_interactive_directed_graph(tmp_path: Path):
+    target = tmp_path / "architecture.html"
+
+    fallback_diagram(architecture(), "Fixture architecture", target)
+
+    document = target.read_text(encoding="utf-8")
+    assert '<svg id="canvas"' in document
+    assert 'marker-end="url(#arrow)"' in document
+    assert 'data-source="web" data-target="service"' in document
+    assert 'id="zoom-in"' in document
+    assert 'id="details" aria-live="polite"' in document
+    assert "Source membership" in document
+    assert "Depends on" in document
+    assert "Used by" in document
+    assert "display:grid;grid-template-columns:repeat(auto-fit" not in document
+
+
+def test_fallback_escapes_untrusted_architecture_text(tmp_path: Path):
+    model = architecture()
+    model.components[0].name = "<script>alert('node')</script>"
+    model.components[0].responsibility = "break </script><script>alert('responsibility')</script>"
+    target = tmp_path / "safe.html"
+
+    fallback_diagram(model, "<unsafe>", target)
+
+    document = target.read_text(encoding="utf-8")
+    assert "<script>alert('node')</script>" not in document
+    assert "</script><script>alert('responsibility')</script>" not in document
+    assert "&lt;script&gt;" in document
 
 
 def test_principal_relationships_prioritise_main_path():

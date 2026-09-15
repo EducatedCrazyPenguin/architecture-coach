@@ -298,16 +298,16 @@ class Store:
         self, project_id: str, snapshot_id: str, prior_id: str | None, status: str,
         architecture: dict, critique: dict, changes: dict, artifacts: dict,
         reused_from_id: str | None = None, error: str | None = None,
-        *, quality: str = "legacy", positions: dict | None = None,
+        *, quality: str = "legacy", positions: dict | None = None, format_version: int = 2,
     ) -> str:
         review_id = uuid.uuid4().hex
         with self.connect() as conn:
             conn.execute(
                 "INSERT INTO reviews(id,project_id,snapshot_id,prior_review_id,created_at,status,architecture_json,critique_json,changes_json,artifacts_json,reused_from_id,error,quality,format_version,positions_json) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,2,?)",
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (review_id, project_id, snapshot_id, prior_id, utc_now(), status, json.dumps(architecture),
                  json.dumps(critique), json.dumps(changes), json.dumps(artifacts), reused_from_id, error,
-                 quality, json.dumps(positions or {})),
+                 quality, format_version, json.dumps(positions or {})),
             )
         return review_id
 

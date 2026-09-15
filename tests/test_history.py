@@ -7,7 +7,7 @@ import pytest
 from archcoach.config import Settings
 from archcoach.db import Store
 from archcoach.models import ProjectCreate
-from archcoach.review import ReviewEngine, validate_comparison_records
+from archcoach.review import REVIEW_FORMAT_VERSION, ReviewEngine, validate_comparison_records
 
 
 class CompleteCodex:
@@ -51,6 +51,7 @@ def setup_engine(tmp_path: Path):
 def test_unchanged_check_reuses_review_conversation_and_lesson_progress(tmp_path: Path):
     _, store, project, engine = setup_engine(tmp_path)
     review_id = engine.run(project["id"])
+    assert store.get_review(review_id)["format_version"] == REVIEW_FORMAT_VERSION
     conversation = store.conversation_for_review(review_id)
     store.add_message(conversation["id"], "user", "remember this")
     store.set_lesson_status(review_id, "boundary", "learning")

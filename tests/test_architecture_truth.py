@@ -64,6 +64,38 @@ def test_fallback_does_not_invent_runtime_order_or_capture_strength():
     assert all("captur" not in strength.lower() for strength in critique.strengths)
 
 
+def test_fallback_architecture_keeps_supporting_files_out_of_runtime_graph():
+    analysis = {
+        "files": [
+            {"path": "audio_engine/processor.py", "language": "python", "lines": 80, "definitions": [{"name": "process_audio", "line": 4}], "imports": []},
+            {"path": "app.py", "language": "python", "lines": 30, "definitions": [{"name": "main", "line": 8}], "imports": [{"status": "local"}]},
+            {"path": "tests/test_audio.py", "language": "python", "lines": 25, "definitions": [{"name": "test_audio", "line": 5}], "imports": [{"status": "local"}]},
+            {"path": "test_cli.py", "language": "python", "lines": 15, "definitions": [{"name": "test_cli", "line": 3}], "imports": []},
+            {"path": "README.md", "language": "other", "lines": 40, "definitions": [], "imports": []},
+            {"path": "requirements.txt", "language": "other", "lines": 10, "definitions": [], "imports": []},
+        ],
+        "edges": [
+            {"source": "app.py", "target": "audio_engine/processor.py", "kind": "imports"},
+            {"source": "tests/test_audio.py", "target": "audio_engine/processor.py", "kind": "imports"},
+        ],
+        "cycles": [],
+    }
+
+    model = heuristic_architecture({"name": "Voice", "description": ""}, analysis)
+
+    names = {component.name for component in model.components}
+    assert "README.md" not in names
+    assert "requirements.txt" not in names
+    assert names == {"audio_engine", "app.py", "tests"}
+    tests = next(component for component in model.components if component.name == "tests")
+    assert tests.source_paths == ["test_cli.py", "tests/test_audio.py"]
+    assert "Automated test boundary" in tests.responsibility
+    package = next(component for component in model.components if component.name == "audio_engine")
+    assert "80 lines" in package.responsibility
+    assert "process_audio" in package.responsibility
+    assert {(relation.source, relation.target) for relation in model.relationships}
+
+
 def test_identity_survives_unique_content_hash_rename_and_discloses_ambiguity():
     before = Architecture(summary="before", components=[component("stable", "old.py")])
     after = Architecture(summary="after", components=[component("generated", "renamed.py")])

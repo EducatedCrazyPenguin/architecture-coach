@@ -25,7 +25,7 @@ class ReviewCancelled(RuntimeError):
 
 
 ANALYSIS_FORMAT_VERSION = 2
-REVIEW_FORMAT_VERSION = 2
+REVIEW_FORMAT_VERSION = 3
 
 
 def review_configuration_fingerprint(project: dict, settings: Settings) -> str:
@@ -52,10 +52,22 @@ def _slug(text: str, fallback: str) -> str:
 
 
 def heuristic_architecture(project: dict, analysis: dict) -> Architecture:
+    all_files = analysis["files"]
+    code_suffixes = {".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".dsa", ".html", ".css", ".sql"}
+    code_files = [file for file in all_files if Path(file["path"]).suffix.lower() in code_suffixes]
+    # Documentation and manifests inform the review but are not runtime components
+    # when the snapshot contains source code.
+    architecture_files = code_files or all_files
     grouped: dict[str, list[dict]] = {}
-    for file in analysis["files"]:
-        top = file["path"].split("/", 1)[0]
-        key = top if "/" in file["path"] else file["path"]
+    for file in architecture_files:
+        parts = file["path"].split("/")
+        basename = parts[-1].lower()
+        if parts[0].lower() in {"test", "tests"} or basename.startswith("test_") or ".test." in basename:
+            key = "tests"
+        elif len(parts) >= 3 and parts[0].lower() in {"src", "lib"}:
+            key = "/".join(parts[:2])
+        else:
+            key = parts[0] if len(parts) > 1 else file["path"]
         grouped.setdefault(key, []).append(file)
     groups = sorted(grouped.items(), key=lambda item: sum(f["lines"] for f in item[1]), reverse=True)[:12]
     components: list[Component] = []
@@ -69,7 +81,29 @@ def heuristic_architecture(project: dict, analysis: dict) -> Architecture:
         sample = files[0]
         kinds = {f["language"] for f in files}
         kind = "frontend" if any(Path(f["path"]).suffix in {".tsx", ".jsx", ".html", ".css"} for f in files) else "database" if any("db" in f["path"].lower() or f["path"].endswith(".sql") for f in files) else "backend"
-        responsibility = f"{len(files)} source file{'s' if len(files) != 1 else ''}; {', '.join(sorted(kinds))}"
+        definitions = [definition["name"] for file in files for definition in file.get("definitions", [])]
+        local_imports = sum(
+            imported.get("status") == "local"
+            for file in files for imported in file.get("imports", [])
+        )
+        facts = (
+            f"{len(files)} source file{'s' if len(files) != 1 else ''}, "
+            f"{sum(file['lines'] for file in files)} lines, {len(definitions)} definitions, "
+            f"and {local_imports} confirmed local import{'s' if local_imports != 1 else ''}"
+        )
+        lowered = name.lower()
+        if lowered == "tests":
+            role = "Automated test boundary"
+        elif "train" in lowered:
+            role = "Training and model-preparation area (role inferred from its path)"
+        elif len(files) == 1 and Path(name).stem.lower() in {"app", "main", "server", "cli", "index"}:
+            role = "Application entry module (role inferred from its filename)"
+        elif len(files) == 1:
+            role = f"{Path(name).stem.replace('_', ' ').title()} module (role inferred from its filename)"
+        else:
+            role = "Source package boundary"
+        named = f" Key definitions: {', '.join(definitions[:4])}." if definitions else ""
+        responsibility = f"{role}: {facts}.{named}"
         components.append(Component(
             id=identifier, name=name, kind=kind, responsibility=responsibility,
             sources=[Evidence(path=sample["path"], line=1, label="Representative source")],
@@ -83,7 +117,7 @@ def heuristic_architecture(project: dict, analysis: dict) -> Architecture:
         source, target = path_to_id.get(edge["source"]), path_to_id.get(edge["target"])
         if source and target and source != target and (source, target) not in seen:
             seen.add((source, target)); relationships.append(Relationship(source=source, target=target, label=edge["kind"], inferred=False))
-    description = project.get("description") or f"{project['name']} contains {len(analysis['files'])} analysed source and documentation files."
+    description = project.get("description") or f"{project['name']} contains {len(analysis['files'])} analysed source and supporting files."
     summary = f"{description} This limited static view confirms source dependencies; runtime execution order is unconfirmed."
     return Architecture(summary=summary, main_path=[], components=components, relationships=relationships)
 
@@ -470,7 +504,7 @@ class ReviewEngine:
         review_stub = self.store.create_review(
             project_id, snapshot_id, previous["id"] if previous else None, "rendering",
             architecture.model_dump(), critique.model_dump(), changes, {}, quality=quality,
-            positions=positions,
+            positions=positions, format_version=REVIEW_FORMAT_VERSION,
         )
         artifact_dir = self.settings.artifact_dir / project_id / review_stub
         progress(80, "Rendering architecture")
