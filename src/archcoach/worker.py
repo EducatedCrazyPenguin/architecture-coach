@@ -99,7 +99,7 @@ class Worker:
                         finished_at=utc_now(),
                     )
                 else:
-                    self.store.fail_job(job["id"], error=str(exc))
+                    self.store.fail_job(job["id"], error=str(exc), error_code=getattr(exc, "code", "execution_failed"))
             if self.only_job_id:
                 return
 

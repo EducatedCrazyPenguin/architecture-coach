@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -118,7 +117,10 @@ class Store:
             backup_dir = self.path.parent / "backups"
             backup_dir.mkdir(parents=True, exist_ok=True)
             stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            shutil.copy2(self.path, backup_dir / f"{self.path.stem}-v{version}-{stamp}.db")
+            backup_path = backup_dir / f"{self.path.stem}-v{version}-{stamp}-{uuid.uuid4().hex[:8]}.db"
+            with sqlite3.connect(self.path, timeout=30) as source:
+                with sqlite3.connect(backup_path) as destination:
+                    source.backup(destination)
         with sqlite3.connect(self.path, timeout=30) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")

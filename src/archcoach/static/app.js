@@ -46,7 +46,7 @@ document.addEventListener("DOMContentLoaded", () => {
     currentStatus.textContent = labels[result.status] || "Current-file status unavailable";
     currentStatus.className = `pill ${result.status === "matches" ? "ok" : "warn"}`;
   }).catch(() => { currentStatus.textContent = "Current-file status unavailable"; currentStatus.className = "pill warn"; });
-  document.querySelectorAll("[data-question]").forEach(button => button.addEventListener("click", () => {
+  document.querySelectorAll(".suggestions button[data-question]").forEach(button => button.addEventListener("click", () => {
     const area = document.querySelector('.chat-form textarea'); if (area) { area.value = button.dataset.question; area.focus(); }
   }));
   if (!window.htmx) {

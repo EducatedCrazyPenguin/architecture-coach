@@ -5,6 +5,7 @@ import re
 import tempfile
 import hashlib
 import time
+import copy
 from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
@@ -399,7 +400,19 @@ class ReviewEngine:
     def __init__(self, settings: Settings, store: Store, codex: CodexAdapter | None = None):
         self.settings, self.store, self.codex = settings, store, codex or CodexAdapter(settings)
 
-    def run(
+    def _job_engine(self):
+        """Freeze effective configuration when work starts, including both AI passes."""
+        engine = copy.copy(self)
+        if isinstance(self.codex, CodexAdapter):
+            engine.codex = copy.copy(self.codex)
+            engine.codex.settings = engine.settings
+            engine.codex.current = None
+        return engine
+
+    def run(self, *args, **kwargs) -> str:
+        return self._job_engine()._run_review(*args, **kwargs)
+
+    def _run_review(
         self,
         project_id: str,
         progress=lambda p, m: None,
@@ -618,7 +631,10 @@ class ReviewEngine:
         progress(100, "Review complete" if quality == "complete" else "Limited review saved")
         return review_stub
 
-    def chat(
+    def chat(self, *args, **kwargs) -> str:
+        return self._job_engine()._run_chat(*args, **kwargs)
+
+    def _run_chat(
         self,
         review_id: str,
         message: str,

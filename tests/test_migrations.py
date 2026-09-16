@@ -62,3 +62,23 @@ def test_version_three_database_adds_quiz_answers_transactionally(tmp_path: Path
         assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='quiz_answers'").fetchone()
     assert list((tmp_path / "backups").glob("archcoach-v3-*.db"))
+
+
+def test_migration_backup_includes_committed_wal_data(tmp_path: Path):
+    database = tmp_path / "archcoach.db"
+    Store(database)
+    with sqlite3.connect(database) as conn:
+        conn.execute("PRAGMA user_version=3")
+    held = sqlite3.connect(database)
+    try:
+        held.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        held.execute("PRAGMA wal_autocheckpoint=0")
+        held.execute("INSERT INTO settings VALUES('committed_marker','1')")
+        held.commit()
+        Store(database)
+        backup = next((tmp_path / "backups").glob("archcoach-v3-*.db"))
+        with sqlite3.connect(backup) as copied:
+            assert copied.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+            assert copied.execute("SELECT value_json FROM settings WHERE key='committed_marker'").fetchone()[0] == "1"
+    finally:
+        held.close()

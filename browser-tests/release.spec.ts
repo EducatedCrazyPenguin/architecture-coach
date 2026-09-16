@@ -100,7 +100,10 @@ test("project review, lesson, chat, settings, and comparison use saved evidence"
   await expect(page.getByRole("heading", { name: "Repository quiz" })).toBeVisible();
   await expect(page.locator(".quiz-card")).toHaveCount(10);
   const firstQuestion = page.locator(".quiz-card").first();
+  await page.locator("#chat textarea").fill("Keep this unsent question.");
   await firstQuestion.locator('.quiz-option[data-index="1"]').click();
+  await expect(page.locator("#chat textarea")).toHaveValue("Keep this unsent question.");
+  await expect(firstQuestion.locator('input[value="1"]')).toBeFocused();
   await firstQuestion.getByRole("button", { name: "Check answer" }).click();
   await expect(firstQuestion.getByText("Not quite", { exact: true })).toBeVisible();
   await expect(firstQuestion.getByText(/Correct answer:/)).toBeVisible();

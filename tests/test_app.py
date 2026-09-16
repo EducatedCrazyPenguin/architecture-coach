@@ -270,3 +270,41 @@ def test_repository_quiz_checks_explains_and_persists_answers(tmp_path: Path):
     assert 'id="quiz-answered">1</span>/10 answered' in page.text
     assert 'id="quiz-score">0</span> correct' in page.text
     assert question["explanations"][wrong_index] in page.text
+    malformed = client.post(
+        f"/reviews/{review_id}/quiz/{question['id']}",
+        headers={"X-ArchCoach-Token": token, "Content-Type": "application/json"},
+        content="{invalid",
+    )
+    assert malformed.status_code == 422
+
+
+def test_running_review_keeps_provider_settings_until_next_job(tmp_path: Path, monkeypatch):
+    from archcoach.ai import CodexAdapter
+    from tests.test_history import CompleteCodex
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "app.py").write_text("value = 1\n", encoding="utf-8")
+    app, client = make_client(tmp_path)
+    headers = {"X-ArchCoach-Token": app.state.csrf_token}
+    created = client.post("/api/projects", headers=headers, json={"path": str(project)}).json()
+    seen = []
+    changed = False
+    fixture = CompleteCodex()
+
+    def run_structured(adapter, prompt, schema, *args, **kwargs):
+        nonlocal changed
+        seen.append(adapter.settings.ai_provider)
+        if not changed:
+            changed = True
+            assert client.patch("/api/settings", headers=headers, json={"ai_provider": "ollama"}).status_code == 200
+        return fixture.run_structured(prompt, schema, *args, **kwargs)
+
+    monkeypatch.setattr(CodexAdapter, "run_structured", run_structured)
+    monkeypatch.setattr("archcoach.review.render_diagram", lambda *args, **kwargs: {"renderer": "unavailable"})
+    engine = app.state.worker.engine
+    first = engine.run(created["id"], force=True)
+    assert seen == ["codex", "codex"]
+    second = engine.run(created["id"], force=True)
+    assert seen == ["codex", "codex", "ollama", "ollama"]
+    assert first != second

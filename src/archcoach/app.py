@@ -257,7 +257,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(404, "Quiz question not found in this review")
         try:
             data = QuizAnswerRequest.model_validate(await request.json())
-        except ValidationError as exc:
+        except (ValidationError, json.JSONDecodeError) as exc:
             raise HTTPException(422, str(exc)) from exc
         if data.selected_index >= len(question["options"]):
             raise HTTPException(422, "Selected option is outside this question")
