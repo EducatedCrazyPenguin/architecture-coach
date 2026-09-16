@@ -10,7 +10,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
 
-from .ai import ARCHITECTURE_PROMPT, CRITIQUE_PROMPT, CHAT_PROMPT, CodexAdapter, CodexError, CodexMalformedOutput
+from .ai import ARCHITECTURE_PROMPT, CRITIQUE_PROMPT, CHAT_PROMPT, CodexAdapter, CodexError, CodexMalformedOutput, create_adapter
 from .analyze import analyze_snapshot, compact_analysis, manifest_changes
 from .capture import CaptureCancelled, capture_project, read_blob
 from .config import Settings
@@ -39,7 +39,7 @@ def review_configuration_fingerprint(project: dict, settings: Settings) -> str:
         "codex_command": settings.codex_command,
         "ai_provider": settings.ai_provider,
         "codex_model": settings.codex_model,
-        "ollama_model": settings.ollama_model,
+        "ollama_model": settings.ollama_model or "qwen3.6:27b",
         "reasoning_effort": settings.reasoning_effort,
         "source_packet_chars": settings.source_packet_chars,
         "source_packet_limit": settings.source_packet_limit,
@@ -402,11 +402,14 @@ def validate_comparison_records(before: dict, after: dict) -> None:
 
 class ReviewEngine:
     def __init__(self, settings: Settings, store: Store, codex: CodexAdapter | None = None):
-        self.settings, self.store, self.codex = settings, store, codex or CodexAdapter(settings)
+        self.settings, self.store, self.codex = settings, store, codex or create_adapter(settings)
 
     def _job_engine(self):
         """Freeze effective configuration when work starts, including both AI passes."""
         engine = copy.copy(self)
+        from .ollama import OllamaAdapter
+        if isinstance(self.codex, OllamaAdapter):
+            engine.codex = OllamaAdapter(engine.settings)
         if isinstance(self.codex, CodexAdapter):
             engine.codex = copy.copy(self.codex)
             engine.codex.settings = engine.settings
@@ -671,8 +674,17 @@ class ReviewEngine:
         message: str,
         *,
         cancelled: Callable[[], bool] | None = None,
+        job_id: str | None = None,
     ) -> str:
         is_cancelled = cancelled or (lambda: False)
+        usage_total = {}
+        deadline = time.monotonic() + self.settings.review_timeout
+        def on_event(event):
+            if job_id:
+                fields = {"stage":"instructor", "last_activity_at":utc_now(), "message":"Instructor is answering"}
+                if event.get("usage"):
+                    fields["usage_json"] = {key:usage_total.get(key, 0) + value for key, value in event["usage"].items() if isinstance(value, int)}
+                self.store.update_job(job_id, **fields)
         if is_cancelled():
             raise ReviewCancelled("Chat cancelled")
         review = self.store.get_review(review_id); snapshot = self.store.get_snapshot(review["snapshot_id"]); conversation = self.store.conversation_for_review(review_id)
@@ -713,15 +725,26 @@ class ReviewEngine:
                 response = None
                 for attempt in range(2):
                     try:
+                        remaining = int(deadline - time.monotonic())
+                        if remaining <= 0:
+                            from .ai import CodexTimeoutError
+                            raise CodexTimeoutError("Instructor exceeded the total time budget")
+                        self.codex.last_usage = {}
                         response = ChatResponse.model_validate(self.codex.run_structured(
                             prompt, self.settings.schema_dir / "chat.json", root,
-                            timeout=self.settings.codex_call_timeout, cancelled=is_cancelled,
+                            timeout=min(self.settings.codex_call_timeout, remaining), cancelled=is_cancelled,
+                            on_event=on_event,
                         ))
                         break
                     except (ValueError, CodexMalformedOutput) as exc:
                         if attempt:
                             raise
                         prompt += f"\nYour response failed validation: {exc}. Return one corrected schema response."
+                    finally:
+                        for key, value in getattr(self.codex, "last_usage", {}).items():
+                            usage_total[key] = usage_total.get(key, 0) + value
+                        if job_id:
+                            self.store.update_job(job_id, usage_json=usage_total)
                 assert response is not None
                 if is_cancelled():
                     raise ReviewCancelled("Chat cancelled")
@@ -732,7 +755,7 @@ class ReviewEngine:
             except (CodexError, ValueError, KeyError, json.JSONDecodeError) as exc:
                 if is_cancelled():
                     raise ReviewCancelled("Chat cancelled") from exc
-                answer = f"I could not run Codex for this question: {exc}. The saved review remains available."
+                answer = f"I could not run the selected AI provider for this question: {exc}. The saved review remains available."
                 self.store.add_message(conversation["id"], "assistant", answer, [], status="failed")
                 raise
         if is_cancelled():

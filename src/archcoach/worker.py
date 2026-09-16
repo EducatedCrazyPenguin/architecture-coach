@@ -77,6 +77,7 @@ class Worker:
                 elif job["operation"] == "chat":
                     conversation_id = self.engine.chat(
                         job["review_id"], job["payload"]["message"], cancelled=cancelled,
+                        job_id=job["id"],
                     )
                     if cancelled():
                         raise ReviewCancelled("Chat cancelled")

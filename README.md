@@ -31,7 +31,7 @@ The app binds only to `127.0.0.1:8765`. Use **Exit app** in the sidebar to stop 
 - A ten-question repository quiz with four choices, source evidence, saved progress, and an explanation for every selected answer.
 - A conversation tied to that immutable review snapshot.
 
-The app uses the saved Codex CLI login and runs review sessions read-only. On Windows it discovers the CLI included with the Codex desktop app even when the launcher has a narrower PATH. Ollama is supported through Codex CLI's local-provider mode; start Ollama, choose the exact installed model in Settings, and refresh diagnostics. If the selected provider is unavailable, the app produces a clearly simpler deterministic review from static analysis. Reviews never run or import target project code.
+The app uses the saved Codex CLI login and runs review sessions read-only. On Windows it discovers the CLI included with the Codex desktop app even when the launcher has a narrower PATH. Ollama connects directly to its local API, independently of Codex CLI. Start Ollama, select **Ollama · local** in Settings, and choose your installed model (default `qwen3.6:27b`). Reviews and instructor chat use that local model; there is no automatic cloud fallback. If the selected provider is unavailable, the app produces a clearly simpler deterministic review from static analysis. Reviews never run or import target project code.
 
 ## Storage and privacy
 
@@ -42,7 +42,7 @@ Archify is vendored at commit `a07fa1d5b2a10cbea110c5a2be2817397a301cdc` under `
 ## Recovery and maintenance
 
 - **Codex login:** Architecture Coach discovers the Windows desktop app's bundled CLI. If its saved session expired, open Codex and sign in, then use **Settings → Refresh diagnostics** before retrying.
-- **Ollama:** start the Ollama app, select **Ollama through Codex CLI**, and refresh diagnostics. When exactly one local model is installed, Architecture Coach selects it automatically; otherwise enter the model's exact name.
+- **Ollama:** start the Ollama app, select **Ollama · local**, and refresh diagnostics. The default is `qwen3.6:27b`; install it with `ollama pull qwen3.6:27b` or prepare it with `ollama run qwen3.6:27b`. Enter another installed model name if desired. Codex CLI and account authentication are unnecessary in local mode.
 - **Git inspection:** Architecture Coach checks Git ignore rules before capture. It discovers Git from PATH, normal Git for Windows locations, and Codex's bundled runtime. If none is available for a Git repository, install Git for Windows and restart the app.
 - **Usage limits and timeouts:** the app pauses scheduled retries after these failures. Retry manually after the limit resets, or adjust the per-call and per-review limits in Settings.
 - **Interrupted work:** reopening the launcher marks work abandoned by the prior owning worker and queues one catch-up review when a project is overdue. Completed reviews remain available after a failed attempt.
@@ -63,3 +63,5 @@ archcoach doctor
 The application is divided into capture, static analysis, Codex, review, diagram, persistence, worker, and web layers. JSON schemas under `src/archcoach/schemas` constrain Codex output.
 
 Product ideas being considered for later releases are tracked in `docs/FUTURE_UPDATES.md`.
+
+The direct local adapter uses Ollama's [chat API](https://docs.ollama.com/api/chat) and [schema-constrained structured outputs](https://docs.ollama.com/capabilities/structured-outputs).

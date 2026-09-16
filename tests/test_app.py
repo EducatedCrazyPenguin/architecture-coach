@@ -301,6 +301,8 @@ def test_running_review_keeps_provider_settings_until_next_job(tmp_path: Path, m
         return fixture.run_structured(prompt, schema, *args, **kwargs)
 
     monkeypatch.setattr(CodexAdapter, "run_structured", run_structured)
+    from archcoach.ollama import OllamaAdapter
+    monkeypatch.setattr(OllamaAdapter, "run_structured", run_structured)
     monkeypatch.setattr("archcoach.review.render_diagram", lambda *args, **kwargs: {"renderer": "unavailable"})
     engine = app.state.worker.engine
     first = engine.run(created["id"], force=True)
@@ -308,3 +310,16 @@ def test_running_review_keeps_provider_settings_until_next_job(tmp_path: Path, m
     second = engine.run(created["id"], force=True)
     assert seen == ["codex", "codex", "ollama", "ollama"]
     assert first != second
+
+
+def test_settings_local_provider_does_not_require_codex(tmp_path: Path, monkeypatch):
+    from archcoach.ollama import OllamaAdapter
+    monkeypatch.setattr("archcoach.ai.CodexAdapter.status", lambda self: (_ for _ in ()).throw(AssertionError("Codex must not be inspected")))
+    monkeypatch.setattr(OllamaAdapter, "models", lambda self:["qwen3.6:27b"])
+    app, client = make_client(tmp_path)
+    response = client.patch("/api/settings", json={"ai_provider":"ollama", "codex_command":"missing-codex", "ollama_model":"qwen3.6:27b"}, headers={"X-ArchCoach-Token":app.state.csrf_token})
+    assert response.status_code == 200
+    page = client.get("/settings?refresh=true")
+    assert page.status_code == 200
+    assert "Local Ollama ready: qwen3.6:27b" in page.text
+    assert isinstance(app.state.worker.engine.codex, OllamaAdapter)

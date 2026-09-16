@@ -35,3 +35,12 @@ Final verification: **86 pytest tests passed**, **3 Edge browser scenarios passe
 - AUD-06: quiz requests disable duplicate submissions and preserve selections on network failure.
 
 Desktop and narrow-screen synthetic screenshots were inspected locally and remain excluded from Git.
+
+## Independent Ollama checkpoint
+
+- AUD-11: implemented a direct loopback-only Ollama HTTP adapter. Web, CLI and headless review services select it independently of Codex. The default local model is `qwen3.6:27b`; no automatic model substitution or cloud fallback occurs. Cloud-backed model entries are excluded.
+- Streaming structured responses, reported usage, cancellation, timeout, incomplete/malformed output and missing-model states have automated coverage.
+- A real local synthetic instructor answer succeeded with the installed `qwen3.5:9b-q8_0`, a deliberately unavailable Codex command, valid JSON and a source citation. Operational output remains private.
+- **Prerequisite for requested-model acceptance:** the running local server did not list `qwen3.6:27b` during this check. Complete its installation in that server and refresh Settings; then run full review/chat acceptance on that exact model. It has not been represented as verified.
+- Next: inline instructor job progress, whole-job usage/deadline handling, and fuller real-provider acceptance.
+- Verification: **94 pytest tests passed**, **3 Edge browser scenarios passed**, compile and whitespace checks passed. A settings regression proves local readiness never calls Codex diagnostics. Instructor jobs now expose stream activity and sum reported token usage from repair calls within a shared time budget.

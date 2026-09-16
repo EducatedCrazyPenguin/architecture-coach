@@ -44,7 +44,7 @@ Build a private library from completed repository quizzes so concepts can be rev
 - Offer spaced review sessions using evidence from the immutable review that created each question.
 - Group questions by concepts such as boundaries, coupling, data flow, testing, and dependency direction.
 - Keep private source excerpts inside `%LOCALAPPDATA%\ArchCoach`; export only when the user explicitly chooses a destination.
-- Work with either the Codex account provider or Ollama through Codex CLI.
+- Work with either the Codex account provider or direct local Ollama.
 - Detect when a cited review is old and link to the newer project review without rewriting the original question.
 
 ### Acceptance checks

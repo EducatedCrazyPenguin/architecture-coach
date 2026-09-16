@@ -110,6 +110,27 @@ class FailingChatCodex:
         raise CodexAuthenticationError("login expired")
 
 
+def test_instructor_job_tracks_streaming_and_repair_usage(tmp_path: Path):
+    _, store, engine, review_id = setup_review(tmp_path)
+    class StreamingRepair(CapturingChatCodex):
+        calls = 0
+        last_usage = {}
+        def run_structured(self, prompt, schema, cwd, **kwargs):
+            self.calls += 1
+            self.last_usage = {"input_tokens":10, "output_tokens":3}
+            kwargs["on_event"]({"type":"turn.completed", "usage":self.last_usage})
+            if self.calls == 1:
+                return {"not_an_answer":True}
+            return super().run_structured(prompt, schema, cwd, **kwargs)
+    engine.codex = StreamingRepair()
+    job_id = store.enqueue("chat", None, {"message":"Explain"}, review_id=review_id, priority=1)
+    store.claim_job(job_id)
+    engine.chat(review_id, "Explain", job_id=job_id)
+    job = store.get_job(job_id)
+    assert job["stage"] == "instructor"
+    assert job["usage"] == {"input_tokens":20, "output_tokens":6}
+
+
 def test_chat_failure_is_persisted_as_failed_and_raised_to_job(tmp_path: Path):
     _, store, engine, review_id = setup_review(tmp_path)
     engine.codex = FailingChatCodex()

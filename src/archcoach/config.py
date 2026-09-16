@@ -14,7 +14,7 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = 8765
     codex_model: str | None = None
-    ollama_model: str | None = None
+    ollama_model: str | None = "qwen3.6:27b"
     reasoning_effort: str = "low"
     codex_call_timeout: int = 300
     review_timeout: int = 900

@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .ai import CodexAdapter
+from .ai import CodexAdapter, create_adapter
 from .config import Settings, merge_saved_settings
 from .db import Store
 from .diagram import render_selected_comparison
@@ -34,7 +34,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     allowed_setting_keys = set(AppSettingsUpdate.model_fields)
     settings = merge_saved_settings(settings, saved_settings)
     settings.ensure_dirs()
-    codex = CodexAdapter(settings); engine = ReviewEngine(settings, store, codex); worker = Worker(store, engine)
+    codex = create_adapter(settings); engine = ReviewEngine(settings, store, codex); worker = Worker(store, engine)
     templates = Jinja2Templates(directory=str(settings.app_dir / "templates"))
 
     @asynccontextmanager
@@ -389,7 +389,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return {key: getattr(app.state.settings, key) for key in allowed_setting_keys}
 
     def apply_app_settings(update: AppSettingsUpdate) -> dict:
-        nonlocal settings
+        nonlocal settings, codex
         values = update.model_dump(exclude_unset=True)
         if not values:
             return {key: getattr(settings, key) for key in allowed_setting_keys}
@@ -397,8 +397,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         settings = replace(settings, **values)
         app.state.settings = settings
         engine.settings = settings
-        codex.settings = settings
-        codex._capability_cache = None
+        codex = create_adapter(settings)
+        engine.codex = codex
         diagnostics_cache.update({"at": 0.0, "value": None})
         return {key: getattr(settings, key) for key in allowed_setting_keys}
 

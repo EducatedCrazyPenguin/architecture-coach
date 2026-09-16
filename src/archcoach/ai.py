@@ -9,8 +9,6 @@ import sys
 import tempfile
 import threading
 import time
-import urllib.error
-import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
@@ -54,6 +52,15 @@ REQUIRED_FLAGS = {
     "--sandbox", "--ephemeral", "--ignore-user-config", "--ignore-rules",
     "--output-schema", "--output-last-message", "--json", "--strict-config", "--disable",
 }
+
+
+def create_adapter(settings: Settings):
+    if settings.ai_provider == "ollama":
+        from .ollama import OllamaAdapter
+        return OllamaAdapter(settings)
+    return CodexAdapter(settings)
+
+
 DISABLED_FEATURES = (
     "shell_tool", "apps", "hooks", "browser_use", "computer_use", "plugins",
     "skill_search", "web_search_request", "in_app_browser",
@@ -108,12 +115,6 @@ class CodexAdapter:
         env["NO_COLOR"] = "1"
         return env
 
-    @staticmethod
-    def _ollama_models() -> list[str]:
-        with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=3) as response:
-            tags = json.loads(response.read().decode("utf-8"))
-        return sorted(item.get("name", "") for item in tags.get("models", []) if item.get("name"))
-
     def capabilities(self, *, refresh: bool = False) -> tuple[bool, str]:
         if self._capability_cache is not None and not refresh:
             return self._capability_cache
@@ -133,8 +134,6 @@ class CodexAdapter:
             self._capability_cache = (False, f"Codex capability check failed: {exc}")
             return self._capability_cache
         required_flags = set(REQUIRED_FLAGS)
-        if self.settings.ai_provider == "ollama":
-            required_flags.update({"--oss", "--local-provider"})
         missing_flags = sorted(flag for flag in required_flags if flag not in help_result.stdout)
         feature_text = feature_result.stdout
         missing_features = sorted(feature for feature in DISABLED_FEATURES if feature not in feature_text)
@@ -156,22 +155,6 @@ class CodexAdapter:
         resolved = find_codex(self.settings.codex_command) or self.settings.codex_command
         if not self.available():
             return {"provider": self.settings.ai_provider, "available": False, "authenticated": False, "compatible": False, "message": capability_message, "command": resolved}
-        if self.settings.ai_provider == "ollama":
-            try:
-                models = self._ollama_models()
-                selected = self.settings.ollama_model or (models[0] if len(models) == 1 else None)
-                ready = compatible and bool(selected) and selected in models
-                if not models:
-                    message = "Ollama is running, but no local model is installed"
-                elif not selected:
-                    message = "Choose an installed Ollama model: " + ", ".join(models)
-                elif selected not in models:
-                    message = f"Ollama model '{selected}' is not installed. Available: " + ", ".join(models)
-                else:
-                    message = capability_message + (f". Using detected model {selected}" if not self.settings.ollama_model else "")
-                return {"provider": "ollama", "available": True, "authenticated": ready, "compatible": compatible, "message": message, "command": resolved, "models": models, "selected_model": selected}
-            except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
-                return {"provider": "ollama", "available": True, "authenticated": False, "compatible": compatible, "message": f"Start the Ollama app, then refresh diagnostics ({exc})", "command": resolved, "models": []}
         try:
             result = subprocess.run(
                 [*self._base_command(), "login", "status"], capture_output=True, text=True,
@@ -242,18 +225,7 @@ class CodexAdapter:
             "--ephemeral", "--ignore-user-config", "--ignore-rules", "--strict-config",
             "--skip-git-repo-check", "-c", f'model_reasoning_effort="{self.settings.reasoning_effort}"',
         ]
-        if self.settings.ai_provider == "ollama":
-            try:
-                models = self._ollama_models()
-            except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
-                raise CodexUnavailable(f"Start the Ollama app before running a local review: {exc}") from exc
-            selected_model = self.settings.ollama_model or (models[0] if len(models) == 1 else None)
-            if not selected_model:
-                raise CodexUnavailable("Choose an installed Ollama model in Settings")
-            if selected_model not in models:
-                raise CodexUnavailable(f"Ollama model '{selected_model}' is not installed")
-            command.extend(["--oss", "--local-provider", "ollama", "--model", selected_model])
-        elif self.settings.codex_model:
+        if self.settings.codex_model:
             command.extend(["--model", self.settings.codex_model])
         for feature in DISABLED_FEATURES:
             command.extend(["--disable", feature])
