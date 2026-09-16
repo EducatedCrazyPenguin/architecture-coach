@@ -100,7 +100,9 @@ test("project review, lesson, chat, settings, and comparison use saved evidence"
   await expect(page.getByRole("heading", { name: "Repository quiz" })).toBeVisible();
   await expect(page.locator(".quiz-card")).toHaveCount(10);
   const firstQuestion = page.locator(".quiz-card").first();
+  await page.getByRole("button", {name:"Ask instructor", exact:true}).click();
   await page.locator("#chat textarea").fill("Keep this unsent question.");
+  await page.getByRole("button", {name:"Close instructor"}).click();
   await firstQuestion.locator('.quiz-option[data-index="1"]').click();
   await expect(page.locator("#chat textarea")).toHaveValue("Keep this unsent question.");
   await expect(firstQuestion.locator('input[value="1"]')).toBeFocused();
@@ -110,7 +112,23 @@ test("project review, lesson, chat, settings, and comparison use saved evidence"
   await page.reload();
   await expect(page.locator(".quiz-card").first().getByText("Not quite", { exact: true })).toBeVisible();
 
+  await page.locator(".quiz-card").first().getByRole("button", {name:"Discuss with instructor"}).click();
+  await expect(page.locator("#chat textarea")).toHaveValue(/My selected answer:/);
+  await page.getByRole("button", {name:"Close instructor"}).click();
+  await page.getByRole("button", {name:"Ask instructor", exact:true}).click();
   await page.locator("#chat textarea").fill("Who owns the greeting?");
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#chat")).toBeHidden();
+  await page.getByRole("button", {name:"Ask instructor", exact:true}).click();
+  await expect(page.locator("#chat textarea")).toHaveValue("Who owns the greeting?");
+  await page.screenshot({path:"test-results/instructor-desktop.png"});
+  await page.setViewportSize({width:390,height:844});
+  await expect(page.locator("#chat textarea")).toBeFocused();
+  await page.screenshot({path:"test-results/instructor-mobile.png"});
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", {name:"Ask instructor", exact:true})).toBeFocused();
+  await page.setViewportSize({width:1280,height:850});
+  await page.getByRole("button", {name:"Ask instructor", exact:true}).click();
   await page.getByRole("button", { name: "Ask the coach" }).click();
   await waitForJob(page);
   await expect(page.getByText("The saved entry point owns the current greeting behavior.")).toBeVisible();

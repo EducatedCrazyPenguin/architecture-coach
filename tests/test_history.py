@@ -97,3 +97,19 @@ def test_legacy_and_cross_project_comparisons_are_rejected():
         validate_comparison_records(valid, {**valid, "project_id": "other"})
     with pytest.raises(ValueError, match="completed"):
         validate_comparison_records(valid, {**valid, "status": "failed"})
+
+
+def test_invalid_ai_evidence_cannot_advance_successful_schedule(tmp_path: Path, monkeypatch):
+    _, store, project, engine = setup_engine(tmp_path)
+    class InvalidEvidence(CompleteCodex):
+        def run_structured(self, prompt, schema, *args, **kwargs):
+            result = super().run_structured(prompt, schema, *args, **kwargs)
+            if schema.name == "critique.json":
+                result["quiz"][0]["evidence"][0]["line"] = 999
+            return result
+    engine.codex = InvalidEvidence()
+    monkeypatch.setattr("archcoach.review.render_diagram", lambda *args, **kwargs: {"renderer": "unavailable"})
+    review = store.get_review(engine.run(project["id"]))
+    assert review["quality"] == "limited"
+    assert review["critique"]["quiz"][0]["evidence"][0]["valid"] is False
+    assert store.get_project(project["id"])["last_checked_at"] is None

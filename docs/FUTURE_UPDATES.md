@@ -4,7 +4,7 @@ This backlog records product changes for a later update. Each item stays separat
 
 ## UX-001 — Persistent Architecture Tutor side panel
 
-**Status:** proposed
+**Status:** initial panel implemented; inline job progress and fuller accessibility acceptance remain open
 
 Move **Ask about this snapshot** from the final report section into a persistent panel on the right side of a saved review, similar to the Codex conversation panel.
 

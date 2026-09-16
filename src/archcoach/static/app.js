@@ -1,5 +1,44 @@
 document.addEventListener("DOMContentLoaded", () => {
   const token = document.querySelector('meta[name="archcoach-token"]')?.content || "";
+  const instructor = document.getElementById("chat");
+  const toggle = document.querySelector(".instructor-toggle");
+  let returnFocus = null;
+  function openInstructor() {
+    if (!instructor) return;
+    returnFocus = document.activeElement;
+    instructor.hidden = false;
+    document.body.classList.add("instructor-open");
+    toggle?.setAttribute("aria-expanded", "true");
+    instructor.querySelector("textarea")?.focus({preventScroll:true});
+  }
+  function closeInstructor() {
+    if (!instructor) return;
+    instructor.hidden = true;
+    document.body.classList.remove("instructor-open");
+    toggle?.setAttribute("aria-expanded", "false");
+    returnFocus?.focus({preventScroll:true});
+  }
+  toggle?.addEventListener("click", () => instructor.hidden ? openInstructor() : closeInstructor());
+  document.querySelector(".instructor-close")?.addEventListener("click", closeInstructor);
+  document.querySelector('a[href="#chat"]')?.addEventListener("click", event => {event.preventDefault();openInstructor();});
+  if (location.hash === "#chat") openInstructor();
+  window.addEventListener("hashchange", () => {if(location.hash === "#chat") openInstructor();});
+  instructor?.addEventListener("keydown", event => {
+    if(event.key === "Escape") {event.preventDefault();closeInstructor();}
+    if(event.key === "Tab" && window.innerWidth <= 900) {
+      const nodes = [...instructor.querySelectorAll('button,textarea,a,input,select')].filter(node => !node.disabled && node.getClientRects().length);
+      if(event.shiftKey && document.activeElement === nodes[0]) {event.preventDefault();nodes.at(-1)?.focus();}
+      else if(!event.shiftKey && document.activeElement === nodes.at(-1)) {event.preventDefault();nodes[0]?.focus();}
+    }
+  });
+  document.querySelectorAll(".quiz-followup").forEach(button => button.addEventListener("click", () => {
+    openInstructor();
+    const area = instructor.querySelector("textarea");
+    if (area.value.trim()) {toast("Your draft is preserved. Send or clear it before discussing this question.");return;}
+    const selected = button.closest(".quiz-card").querySelector('input[type="radio"]:checked');
+    const answer = selected ? selected.closest("label").textContent.trim() : "Not answered yet";
+    area.value = `${button.dataset.prompt}\nMy selected answer: ${answer}`;
+  }));
   document.querySelectorAll("[data-dialog]").forEach(button => button.addEventListener("click", () => document.getElementById(button.dataset.dialog)?.showModal()));
   document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => button.closest("dialog")?.close()));
   document.querySelectorAll(".copy-task").forEach(button => button.addEventListener("click", async () => {
@@ -13,6 +52,9 @@ document.addEventListener("DOMContentLoaded", () => {
     event.preventDefault();
     const selected = form.querySelector('input[type="radio"]:checked');
     if (!selected) { toast("Choose an answer first"); return; }
+    const submit = form.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    try {
     const response = await fetch(`/reviews/${form.dataset.review}/quiz/${form.dataset.question}`, {
       method:"POST", headers:{"Content-Type":"application/json","X-ArchCoach-Token":token},
       body:JSON.stringify({selected_index:Number(selected.value)})
@@ -37,6 +79,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (answered) answered.textContent = document.querySelectorAll(".quiz-feedback.visible").length;
     if (score) score.textContent = document.querySelectorAll(".quiz-feedback.visible.correct").length;
     toast(result.correct ? "Correct answer" : "Answer explained");
+    } catch (error) {
+      toast("Could not reach the app. Your selected answer is preserved; try again.");
+    } finally {
+      submit.disabled = false;
+    }
   }));
   const currentStatus = document.getElementById("current-file-status");
   if (currentStatus) fetch(`/api/reviews/${currentStatus.dataset.review}/current-status`).then(async response => {

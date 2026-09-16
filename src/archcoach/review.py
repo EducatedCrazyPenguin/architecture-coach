@@ -26,7 +26,7 @@ class ReviewCancelled(RuntimeError):
 
 
 ANALYSIS_FORMAT_VERSION = 2
-REVIEW_FORMAT_VERSION = 4
+REVIEW_FORMAT_VERSION = 5
 
 
 def review_configuration_fingerprint(project: dict, settings: Settings) -> str:
@@ -119,7 +119,7 @@ def heuristic_architecture(project: dict, analysis: dict) -> Architecture:
     for edge in analysis["edges"]:
         source, target = path_to_id.get(edge["source"]), path_to_id.get(edge["target"])
         if source and target and source != target and (source, target) not in seen:
-            seen.add((source, target)); relationships.append(Relationship(source=source, target=target, label=edge["kind"], inferred=False))
+            seen.add((source, target)); relationships.append(Relationship(source=source, target=target, label=edge["kind"], kind="imports", inferred=False))
     description = project.get("description") or f"{project['name']} contains {len(analysis['files'])} analysed source and supporting files."
     summary = f"{description} This limited static view confirms source dependencies; runtime execution order is unconfirmed."
     return Architecture(summary=summary, main_path=[], components=components, relationships=relationships)
@@ -130,8 +130,8 @@ def _quiz_question(identifier: str, question: str, correct: str, distractors: li
     for option in [correct, *distractors]:
         if option not in options:
             options.append(option)
-    while len(options) < 4:
-        options.append(f"None of these ({len(options) + 1})")
+    if len(options) < 4:
+        raise ValueError("A quiz needs three distinct, meaningful distractors")
     options = options[:4]
     selected = options.pop(0)
     correct_index = slot % 4
@@ -158,25 +158,25 @@ def heuristic_quiz(analysis: dict, architecture: Architecture) -> list[QuizQuest
     coverage = analysis.get("coverage", {}).get("level", "unavailable")
     owning_component = next(
         (component.name for component in architecture.components if largest["path"] in component.source_paths),
-        architecture.components[0].name,
+        "Not assigned to a component in this limited view",
     )
     runtime_answer = " → ".join(architecture.main_path) if architecture.main_path else "Runtime order was not confirmed"
     definition_file = next((item for item in files if item.get("definitions")), largest)
-    definition = (definition_file.get("definitions") or [{"name": "No named definition was parsed", "line": 1}])[0]
+    definition = (definition_file.get("definitions") or [{"name": None, "line": 1}])[0]
     definition_evidence = [Evidence(path=definition_file["path"], line=definition.get("line", 1), label="Parsed definition")]
     dependency_answer = f"{first_edge['source']} imports {first_edge['target']}" if first_edge else "No confirmed local dependency was found"
     dependency_evidence = [Evidence(path=first_edge["source"], line=first_edge.get("line", 1), label="Confirmed import")] if first_edge else sample_evidence
     test_component = next((component.name for component in architecture.components if component.name.lower() in {"test", "tests"}), "No separate test component")
     size_guidance = "Inspect whether the largest module mixes responsibilities" if largest["lines"] > 500 else "Keep the module together unless responsibilities or callers diverge"
     return [
-        _quiz_question("repo-definition", f"Which file contains the parsed definition '{definition['name']}'?", definition_file["path"], [path for path in paths if path != definition_file["path"]][:3] + ["No captured file"], f"Static parsing found {definition['name']} in {definition_file['path']} at line {definition.get('line', 1)}.", definition_evidence, 1),
-        _quiz_question("repo-component", f"Which architecture component contains {largest['path']}?", owning_component, [component.name for component in architecture.components if component.name != owning_component][:3] + ["No component"], f"The saved component membership assigns {largest['path']} to {owning_component}.", sample_evidence, 2),
-        _quiz_question("repo-dependency", "Which dependency statement matches the saved static graph?", dependency_answer, ([f"{first_edge['target']} imports {first_edge['source']}"] if first_edge else []) + ["Every file imports every other file", "Only external packages were checked", "Dependency direction was guessed from file size"], f"The graph {'records this source-backed import' if first_edge else 'contains no confirmed local dependency edge'}.", dependency_evidence, 3),
+        _quiz_question("repo-definition", f"What does parsing establish about {definition_file['path']}?", (f"It declares {definition['name']} at line {definition.get('line', 1)}" if definition['name'] else "No named definition was recorded by this parser"), ["Its functions were executed during review", "Its runtime behavior was fully verified", "Its definition names were inferred from file size"], (f"The parser recorded {definition['name']} at line {definition.get('line', 1)}." if definition['name'] else "No definition was recorded. This does not prove the file has no behavior; inspect its saved statements and parser coverage."), definition_evidence, 1),
+        _quiz_question("repo-component", f"Which architecture component contains {largest['path']}?", owning_component, [component.name for component in architecture.components if component.name != owning_component][:3] + ["All components own every source file", "Only external services own local source", "Membership is determined by runtime execution order"], f"Saved membership for {largest['path']}: {owning_component}. Component membership is a review model, not execution order.", sample_evidence, 2),
+        _quiz_question("repo-dependency", "Which statement accurately describes the dependency analysis?", dependency_answer, ["The review executed modules to discover imports", "Dependencies were assigned solely by file size", "Diagram layout establishes runtime execution order"], f"The graph {'records this source-backed import; other edges may also exist' if first_edge else 'contains no confirmed local dependency edge; missing edges do not establish runtime independence'}.", dependency_evidence, 3),
         _quiz_question("repo-dependency-meaning", "What does a confirmed arrow in this architecture map establish?", "Static source contains a resolved dependency", ["The target always runs after the source", "The dependency is safe and well designed", "The application was executed successfully"], "Confirmed arrows come from resolved static imports; they do not by themselves prove runtime order or design quality.", dependency_evidence, 0),
         _quiz_question("repo-unresolved", "What should you conclude from the unresolved-import count?", f"{unresolved_count} imports need more resolution evidence", ["Every external package is broken", "The project cannot run", "Unresolved imports are confirmed runtime failures"], f"The review recorded {unresolved_count} unresolved imports. This is a coverage limitation, not proof of runtime failure.", sample_evidence, 1),
-        _quiz_question("repo-cycles", "What did deterministic dependency analysis find about cycles?", f"{cycle_count} cycle{'s' if cycle_count != 1 else ''} in the resolved graph", ["Every import creates a cycle", "Cycles were inferred from filenames", "Only runtime execution was checked"], f"The strongly connected component analysis found {cycle_count} cycles among resolved local dependencies.", dependency_evidence, 2),
+        _quiz_question("repo-cycles", "What did deterministic dependency analysis find about cycles?", f"{cycle_count} mutually dependent group{'s' if cycle_count != 1 else ''} in the resolved graph", ["Every import creates a cycle", "Cycles were inferred from filenames", "Only runtime execution was checked"], f"Analysis found {cycle_count} strongly connected groups containing cycles. A group may contain more than one cycle; runtime impact needs separate evidence.", dependency_evidence, 2),
         _quiz_question("repo-coverage", "Which interpretation of this review's coverage is accurate?", f"Coverage is {coverage}; runtime behavior may still be unconfirmed", ["All runtime paths were executed", "Deployment configuration was verified", "Every unresolved import is harmless"], f"The saved analysis labels coverage as {coverage} and keeps runtime claims separate from static evidence.", sample_evidence, 3),
-        _quiz_question("repo-tests", "Which component represents automated test code in this architecture?", test_component, [component.name for component in architecture.components if component.name != test_component][:3] + ["Every production component"], f"The saved architecture {'groups captured test files under ' + test_component if test_component != 'No separate test component' else 'did not identify a separate test-code boundary'}.", sample_evidence, 0),
+        _quiz_question("repo-tests", "What can this limited review establish about testing?", "Inspect captured test files and their assertions before claiming coverage", ["Test filenames prove every behavior is covered", "Importing production code proves every assertion passes", "A test component guarantees production reliability"], "Static imports and component names do not establish assertion quality or passing tests. Reviews do not execute target tests.", sample_evidence, 0),
         _quiz_question("repo-next-step", f"What is the most defensible next step for {largest['path']} based on this review?", size_guidance, ["Split it solely because it is the largest file", "Rewrite it without checking callers", "Assume its runtime role from its filename"], f"The file has {largest['lines']} lines. Size is a prompt to inspect cohesion, not enough evidence by itself to force a split.", sample_evidence, 1),
         _quiz_question("repo-runtime", "What does this review establish about the main runtime path?", runtime_answer, ["File size determines execution order", "Tests always run first", "Every import executes in diagram order"], f"The saved architecture {'records ' + runtime_answer if architecture.main_path else 'does not claim a runtime order without source evidence'}.", sample_evidence, 2),
     ]
@@ -348,10 +348,14 @@ def semantic_comparison(
     confirmed_after = {(r.source, r.target) for r in after.relationships if not r.inferred}
     inferred_before = {(r.source, r.target) for r in before.relationships if r.inferred}
     inferred_after = {(r.source, r.target) for r in after.relationships if r.inferred}
+    typed_before = {(r.source, r.target, r.kind, "inferred" if r.inferred else "confirmed") for r in before.relationships}
+    typed_after = {(r.source, r.target, r.kind, "inferred" if r.inferred else "confirmed") for r in after.relationships}
     old_files = {item["path"]: item["sha256"] for item in (before_snapshot or {}).get("manifest", [])}
     new_files = {item["path"]: item["sha256"] for item in current_manifest}
     return {
         "baseline": False,
+        "typed_relationships_added": sorted(typed_after - typed_before),
+        "typed_relationships_removed": sorted(typed_before - typed_after),
         "components_added": sorted(after_components.keys() - before_components.keys()),
         "components_removed": sorted(before_components.keys() - after_components.keys()),
         "components_changed": sorted(key for key in before_components.keys() & after_components.keys() if before_components[key] != after_components[key]),
@@ -493,6 +497,7 @@ class ReviewEngine:
             self.settings, capture["manifest"], analysis,
             changed_paths=changed_paths, anchors=previous_anchors,
         )
+        coverage["ai_source_context"] = source_note
         usage_total: dict[str, int] = {}
 
         def on_codex_event(event: dict) -> None:
@@ -530,6 +535,8 @@ class ReviewEngine:
             root = Path(temp)
             ai_warnings: list[str] = []
             ai_error_codes: list[str] = []
+            if "Omitted " in source_note or "Partially included:" in source_note:
+                ai_warnings.append("AI inspected only part of the captured source. " + source_note)
             progress(25, "Building architecture")
             check_cancelled()
             try:
@@ -549,6 +556,21 @@ class ReviewEngine:
                 architecture = heuristic_architecture(project, analysis)
             check_cancelled()
             validate_architecture_snapshot(architecture, capture["manifest"])
+            membership = {
+                component.id: set(component.source_paths or [item.path for item in component.sources])
+                for component in architecture.components
+            }
+            for relation in architecture.relationships:
+                supported = (relation.kind == "imports" or (relation.kind == "dependency" and relation.label.lower() in {"import", "imports"})) and any(
+                    edge["source"] in membership[relation.source]
+                    and edge["target"] in membership[relation.target]
+                    for edge in analysis["edges"]
+                )
+                if not relation.inferred and not supported:
+                    relation.inferred = True
+                    ai_warnings.append(
+                        f"Relationship {relation.source} → {relation.target} is inferred: static analysis did not confirm its claimed semantics."
+                    )
             identity_uncertainty: list[dict] = []
             if previous and previous_snapshot:
                 architecture, identity_uncertainty = preserve_component_identity(
@@ -580,6 +602,15 @@ class ReviewEngine:
                 ai_error_codes.append(getattr(exc, "code", "invalid_critique"))
                 critique = heuristic_critique(analysis, architecture)
             validate_evidence(critique, capture["manifest"])
+            cited_items = [*architecture.components, *critique.findings, *critique.lessons, *critique.quiz]
+            invalid_count = sum(
+                not evidence.valid
+                for item in cited_items
+                for evidence in (item.sources if hasattr(item, "sources") else item.evidence)
+            )
+            if invalid_count:
+                ai_warnings.append(f"{invalid_count} source citations could not be verified. This report is limited; unverified references are not evidence links.")
+                ai_error_codes.append("invalid_evidence")
         check_cancelled()
         quality = "limited" if ai_warnings or capture.get("coverage") == "limited" or analysis["coverage"]["level"] == "limited" else "complete"
         positions = stable_positions(architecture, previous.get("positions") if previous else None)
@@ -653,8 +684,18 @@ class ReviewEngine:
             for path in (component_data.get("source_paths") or [item.get("path") for item in component_data.get("sources", [])])
             if path
         }
+        requested_paths = {
+            item["path"] for item in snapshot["analysis"].get("files", [])
+            if item["path"].casefold() in message.casefold()
+            or Path(item["path"]).name.casefold() in message.casefold()
+            or any(
+                re.search(r"\b" + re.escape(definition["name"]) + r"\b", message, re.IGNORECASE)
+                for definition in item.get("definitions", [])
+            )
+        }
         source_packets, source_note = build_source_packets(
             self.settings, snapshot["manifest"], snapshot["analysis"], anchors=anchors,
+            changed_paths=requested_paths,
         )
         self.settings.runtime_dir.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="chat-", dir=self.settings.runtime_dir) as temp:
@@ -759,6 +800,9 @@ def markdown_report(
         lines.extend(f"- {'ABCD'[option_index]}. {option}" for option_index, option in enumerate(question.options))
         lines += ["", f"Correct answer: {'ABCD'[question.correct_index]}. {question.options[question.correct_index]}", "",
                   question.explanations[question.correct_index], "", "Evidence:", *evidence_lines(question.evidence), ""]
+        lines += ["Why each option is right or wrong:", ""]
+        lines.extend(f"- {'ABCD'[option_index]}. {explanation}" for option_index, explanation in enumerate(question.explanations))
+        lines.append("")
     if not critique.quiz:
         lines += ["This legacy review uses the original lesson format.", "", "## What to learn", ""]
         for lesson in critique.lessons:
@@ -768,6 +812,8 @@ def markdown_report(
                 f"Exercise: {lesson.exercise}", "", "Evidence:", *evidence_lines(lesson.evidence), "",
             ]
     lines += ["## Coverage and limitations", "", f"Coverage level: **{coverage.get('level', 'legacy or unavailable')}**", ""]
+    if coverage.get("ai_source_context"):
+        lines += ["AI source context: " + coverage["ai_source_context"], ""]
     for omission in [*coverage.get("capture_omissions", []), *coverage.get("omissions", [])]:
         lines.append(f"- {omission}")
     if not coverage.get("capture_omissions") and not coverage.get("omissions"):

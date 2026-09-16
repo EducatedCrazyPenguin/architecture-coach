@@ -44,6 +44,7 @@ class Relationship(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source: str
     target: str
+    kind: Literal["dependency", "imports", "calls", "reads", "writes", "publishes", "subscribes"] = "dependency"
     label: str = "uses"
     inferred: bool = False
 

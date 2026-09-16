@@ -2,16 +2,156 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["summary", "main_path", "components", "relationships"],
+  "required": [
+    "summary",
+    "main_path",
+    "components",
+    "relationships"
+  ],
   "properties": {
-    "summary": {"type": "string"},
-    "main_path": {"type": "array", "items": {"type": "string"}},
-    "components": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"$ref": "#/$defs/component"}},
-    "relationships": {"type": "array", "items": {"$ref": "#/$defs/relationship"}}
+    "summary": {
+      "type": "string"
+    },
+    "main_path": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "items": {
+        "$ref": "#/$defs/component"
+      }
+    },
+    "relationships": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/relationship"
+      }
+    }
   },
   "$defs": {
-    "evidence": {"type": "object", "additionalProperties": false, "required": ["path", "line", "end_line", "label", "valid"], "properties": {"path": {"type": "string"}, "line": {"type": "integer", "minimum": 1}, "end_line": {"type": ["integer", "null"], "minimum": 1}, "label": {"type": "string"}, "valid": {"type": "boolean"}}},
-    "component": {"type": "object", "additionalProperties": false, "required": ["id", "name", "kind", "responsibility", "sources", "source_paths"], "properties": {"id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"}, "name": {"type": "string"}, "kind": {"enum": ["frontend", "backend", "database", "cloud", "security", "messagebus", "external"]}, "responsibility": {"type": "string"}, "sources": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"$ref": "#/$defs/evidence"}}, "source_paths": {"type": "array", "maxItems": 250, "items": {"type": "string"}}}},
-    "relationship": {"type": "object", "additionalProperties": false, "required": ["source", "target", "label", "inferred"], "properties": {"source": {"type": "string"}, "target": {"type": "string"}, "label": {"type": "string"}, "inferred": {"type": "boolean"}}}
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "line",
+        "end_line",
+        "label",
+        "valid"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "label": {
+          "type": "string"
+        },
+        "valid": {
+          "type": "boolean"
+        }
+      }
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "responsibility",
+        "sources",
+        "source_paths"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "frontend",
+            "backend",
+            "database",
+            "cloud",
+            "security",
+            "messagebus",
+            "external"
+          ]
+        },
+        "responsibility": {
+          "type": "string"
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "source_paths": {
+          "type": "array",
+          "maxItems": 250,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "target",
+        "label",
+        "inferred",
+        "kind"
+      ],
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "inferred": {
+          "type": "boolean"
+        },
+        "kind": {
+          "enum": [
+            "dependency",
+            "imports",
+            "calls",
+            "reads",
+            "writes",
+            "publishes",
+            "subscribes"
+          ]
+        }
+      }
+    }
   }
 }

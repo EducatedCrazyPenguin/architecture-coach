@@ -383,7 +383,32 @@ def _strongly_connected_cycles(graph: dict[str, list[str]], nodes: set[str]) -> 
         component.sort()
         if len(component) > 1 or start in graph.get(start, []):
             components.append(component)
-    return [component + [component[0]] for component in sorted(components)]
+    # SCC membership is not a traversal. Extract one real witness per group.
+    witnesses = []
+    for component in sorted(components):
+        allowed = set(component)
+        start = component[0]
+        pending = [start]
+        parent = {start: None}
+        witness = None
+        for node in pending:
+            for target in sorted(graph.get(node, [])):
+                if target not in allowed:
+                    continue
+                if target == start:
+                    path = [node]
+                    while parent[path[-1]] is not None:
+                        path.append(parent[path[-1]])
+                    witness = list(reversed(path)) + [start]
+                    break
+                if target not in parent:
+                    parent[target] = node
+                    pending.append(target)
+            if witness:
+                break
+        if witness:
+            witnesses.append(witness)
+    return witnesses
 
 
 def manifest_changes(before: dict[str, list[dict]], after: dict[str, list[dict]]) -> dict:
