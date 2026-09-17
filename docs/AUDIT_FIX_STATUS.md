@@ -44,3 +44,13 @@ Desktop and narrow-screen synthetic screenshots were inspected locally and remai
 - **Prerequisite for requested-model acceptance:** the running local server did not list `qwen3.6:27b` during this check. Complete its installation in that server and refresh Settings; then run full review/chat acceptance on that exact model. It has not been represented as verified.
 - Next: inline instructor job progress, whole-job usage/deadline handling, and fuller real-provider acceptance.
 - Verification: **94 pytest tests passed**, **3 Edge browser scenarios passed**, compile and whitespace checks passed. A settings regression proves local readiness never calls Codex diagnostics. Instructor jobs now expose stream activity and sum reported token usage from repair calls within a shared time budget.
+
+## Inline instructor and review usage checkpoint
+
+- AUD-10: answers now remain in the instructor side panel. The panel displays job stage, elapsed time, reported token usage, cancellation and terminal failures. Closing it keeps the request running and preserves the draft. Conversation refresh uses only the selected saved review; source citations retain local validation and text is inserted safely.
+- AUD-12: review usage now includes malformed responses and schema-repair calls, with cumulative streaming totals. Whole-pipeline deadline enforcement remains open.
+- Browser acceptance verifies that instructor submission leaves the saved-review URL unchanged and displays the saved answer. All three synthetic Edge scenarios passed. A regression verifies conversations remain readable after the source file is removed.
+- Requested-model acceptance remains blocked: the local Ollama server still lists only `qwen3.5:9b-q8_0`, not `qwen3.6:27b`. No substitute is selected automatically.
+- Next: stronger quiz explanations, full pipeline timeout handling, and exact-model real acceptance.
+
+Verification: **95 pytest tests passed**, **3 Edge browser scenarios passed**; JavaScript syntax check passed.

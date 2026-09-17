@@ -96,6 +96,77 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll(".suggestions button[data-question]").forEach(button => button.addEventListener("click", () => {
     const area = document.querySelector('.chat-form textarea'); if (area) { area.value = button.dataset.question; area.focus(); }
   }));
+  const chatForm = document.querySelector(".chat-form");
+  if (chatForm) {
+    const progress = instructor.querySelector(".instructor-progress");
+    const cancel = instructor.querySelector(".instructor-cancel");
+    const submit = chatForm.querySelector('button[type="submit"]');
+    const area = chatForm.querySelector("textarea");
+    const review = chatForm.dataset.review;
+    let activeJob = null;
+    async function refreshConversation() {
+      const response = await fetch(`/api/reviews/${review}/conversation`);
+      if (!response.ok) throw new Error("Could not load saved answers.");
+      const conversation = await response.json();
+      const log = instructor.querySelector(".chat-log");
+      log.replaceChildren();
+      for (const message of conversation.messages) {
+        const article = document.createElement("article");
+        article.className = `message ${message.role === "user" ? "user" : "assistant"}`;
+        const label = document.createElement("span");
+        label.textContent = `${message.role === "user" ? "You" : "Coach"}${message.status === "failed" ? " · failed" : ""}`;
+        const content = document.createElement("p"); content.textContent = message.content;
+        article.append(label, content);
+        for (const citation of message.citations || []) {
+          const link = document.createElement(citation.valid ? "a" : "span");
+          link.className = "evidence";
+          link.textContent = `${citation.path}:${citation.line}${citation.valid ? "" : " · unverified"}`;
+          if (citation.valid) {
+            link.href = `/reviews/${review}/source?path=${encodeURIComponent(citation.path)}&line=${citation.line}#L${citation.line}`;
+            link.target = "_blank"; link.rel = "noopener";
+          }
+          article.append(link);
+        }
+        log.append(article);
+      }
+    }
+    cancel.addEventListener("click", async () => {
+      if (!activeJob) return;
+      cancel.disabled = true;
+      try {
+        const response = await fetch(`/api/jobs/${activeJob}/cancel`, {method:"POST", headers:{"X-ArchCoach-Token":token}});
+        if (!response.ok) throw new Error();
+        progress.textContent = "Cancellation requested…";
+      } catch { toast("Could not cancel. Try again."); }
+      finally { cancel.disabled = false; }
+    });
+    chatForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      if (activeJob || submit.disabled) return;
+      const draft = area.value;
+      submit.disabled = true; progress.hidden = false;
+      progress.textContent = "Queuing your question…";
+      try {
+        const response = await fetch(`/api/reviews/${review}/chat`, {method:"POST", headers:{"Content-Type":"application/json","X-ArchCoach-Token":token}, body:JSON.stringify({message:draft})});
+        if (!response.ok) throw new Error("Could not queue your question. Your draft is preserved.");
+        activeJob = (await response.json()).job_id; cancel.hidden = false;
+        for (;;) {
+          const state = await fetch(`/api/jobs/${activeJob}`);
+          if (!state.ok) throw new Error("Could not check the answer. Check job history before retrying.");
+          const job = await state.json();
+          progress.textContent = `${job.stage || job.status} · ${Math.round(job.elapsed_seconds || 0)}s${job.usage ? ` · ${job.usage.input_tokens ?? "?"} input / ${job.usage.output_tokens ?? "?"} output tokens` : ""}`;
+          if (["complete", "failed", "cancelled"].includes(job.status)) {
+            await refreshConversation();
+            progress.textContent = job.status === "complete" ? "Answer saved with this review." : `${job.status}: ${job.error || "No completed answer was saved."}`;
+            if (job.status === "complete" && area.value === draft) area.value = "";
+            break;
+          }
+          await new Promise(resolve => setTimeout(resolve, 700));
+        }
+      } catch (error) { progress.textContent = error.message || "Could not reach the app. Your draft is preserved."; }
+      finally { activeJob = null; submit.disabled = false; cancel.hidden = true; }
+    });
+  }
   if (!window.htmx) {
     const poll = async () => {
       const state = document.getElementById("job-state");

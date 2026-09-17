@@ -368,6 +368,12 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         except KeyError: raise HTTPException(404)
         return {"job_id": store.enqueue("chat", None, data.model_dump(), review_id=review_id, priority=1)}
 
+    @app.get("/api/reviews/{review_id}/conversation")
+    def api_conversation(review_id: str):
+        try: store.get_review(review_id)
+        except KeyError: raise HTTPException(404)
+        return store.conversation_for_review(review_id)
+
     @app.get("/api/reviews/{review_id}/current-status")
     def api_current_status(review_id: str):
         try:

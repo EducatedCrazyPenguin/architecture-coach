@@ -129,8 +129,10 @@ test("project review, lesson, chat, settings, and comparison use saved evidence"
   await expect(page.getByRole("button", {name:"Ask instructor", exact:true})).toBeFocused();
   await page.setViewportSize({width:1280,height:850});
   await page.getByRole("button", {name:"Ask instructor", exact:true}).click();
+  const reviewUrl = page.url();
   await page.getByRole("button", { name: "Ask the coach" }).click();
-  await waitForJob(page);
+  await expect(page.locator(".instructor-progress")).toBeVisible();
+  await expect(page).toHaveURL(reviewUrl);
   await expect(page.getByText("The saved entry point owns the current greeting behavior.")).toBeVisible();
 
   writeFileSync(join(projectDir, "helper.py"), "def greet(): return 'hello'\n", "utf8");

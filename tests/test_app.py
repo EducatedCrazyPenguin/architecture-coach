@@ -323,3 +323,21 @@ def test_settings_local_provider_does_not_require_codex(tmp_path: Path, monkeypa
     assert page.status_code == 200
     assert "Local Ollama ready: qwen3.6:27b" in page.text
     assert isinstance(app.state.worker.engine.codex, OllamaAdapter)
+def test_conversation_endpoint_keeps_saved_review_boundary(tmp_path: Path):
+    from archcoach.review import ReviewEngine
+    from tests.test_review import OfflineCodex
+    project = tmp_path / 'project'
+    project.mkdir()
+    (project / 'app.py').write_text('x = 1\n', encoding='utf-8')
+    app, client = make_client(tmp_path)
+    from archcoach.models import ProjectCreate
+    stored = app.state.store.add_project(ProjectCreate(path=str(project), name='Example'))
+    review_id = ReviewEngine(app.state.settings, app.state.store, OfflineCodex()).run(stored['id'])
+    conversation = app.state.store.conversation_for_review(review_id)
+    app.state.store.add_message(conversation['id'], 'assistant', '<script>saved answer</script>')
+    (project / 'app.py').unlink()
+    response = client.get(f'/api/reviews/{review_id}/conversation')
+    assert response.status_code == 200
+    assert response.json()['review_id'] == review_id
+    assert response.json()['messages'][0]['content'] == '<script>saved answer</script>'
+    assert client.get('/api/reviews/missing/conversation').status_code == 404

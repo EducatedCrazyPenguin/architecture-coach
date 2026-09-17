@@ -148,6 +148,8 @@ class RepairingCodex(CompleteCodex):
         self.architecture_calls = 0
 
     def run_structured(self, prompt, schema, *args, **kwargs):
+        self.last_usage = {"input_tokens":10, "output_tokens":3}
+        kwargs["on_event"]({"type":"turn.completed", "usage":self.last_usage})
         if schema.name == "architecture.json":
             self.architecture_calls += 1
             if self.architecture_calls == 1:
@@ -165,7 +167,11 @@ def test_final_pass_gets_at_most_one_schema_repair(tmp_path: Path):
     project = store.add_project(ProjectCreate(path=str(source)))
     codex = RepairingCodex()
 
-    review_id = ReviewEngine(settings, store, codex).run(project["id"])
+    job_id = store.enqueue("review", project["id"], {})
+    store.claim_job(job_id)
+    review_id = ReviewEngine(settings, store, codex).run(project["id"], job_id=job_id)
 
     assert codex.architecture_calls == 2
     assert store.get_review(review_id)["quality"] == "complete"
+
+    assert store.get_job(job_id)["usage"] == {"input_tokens":30, "output_tokens":9}

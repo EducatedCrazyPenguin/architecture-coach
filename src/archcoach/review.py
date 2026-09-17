@@ -508,7 +508,7 @@ class ReviewEngine:
                 fields = {"last_activity_at": utc_now(), "stage": "codex"}
                 usage = event.get("usage")
                 if isinstance(usage, dict):
-                    fields["usage_json"] = usage
+                    fields["usage_json"] = {key: usage_total.get(key, 0) + value for key, value in usage.items() if isinstance(value, int)}
                 self.store.update_job(job_id, **fields)
 
         def run_pass(prompt: str, schema_name: str, validator):
@@ -517,20 +517,24 @@ class ReviewEngine:
                 remaining = int(review_deadline - time.monotonic())
                 if remaining <= 0:
                     raise CodexError("Review exceeded its total time budget")
+                self.codex.last_usage = {}
                 try:
                     raw = self.codex.run_structured(
                         prompt, self.settings.schema_dir / schema_name, root,
                         on_event=on_codex_event, timeout=min(self.settings.codex_call_timeout, remaining),
                         cancelled=is_cancelled,
                     )
-                    validated = validator(raw)
-                    for key, value in getattr(self.codex, "last_usage", {}).items():
-                        usage_total[key] = usage_total.get(key, 0) + value
-                    return validated
+                    return validator(raw)
                 except (ValueError, CodexMalformedOutput) as exc:
                     if attempt:
                         raise
                     prompt += f"\n\nYour prior response failed validation: {exc}. Return one corrected response matching the schema."
+                finally:
+                    for key, value in getattr(self.codex, "last_usage", {}).items():
+                        if isinstance(value, int):
+                            usage_total[key] = usage_total.get(key, 0) + value
+                    if job_id:
+                        self.store.update_job(job_id, usage_json=usage_total)
             raise AssertionError("unreachable")
 
         self.settings.runtime_dir.mkdir(parents=True, exist_ok=True)
