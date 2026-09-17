@@ -57,7 +57,7 @@ Verification: **95 pytest tests passed**, **3 Edge browser scenarios passed**; J
 
 ## LM Studio and deadline checkpoint
 
-- AUD-11: Architecture Coach now also supports a direct, loopback-only LM Studio provider. It uses LM Studio's OpenAI-compatible `v1/models` and schema-constrained `v1/chat/completions` endpoints without Codex CLI, plugins, tools, web access, or cloud fallback. Settings include a server model ID and default to the user's downloaded `lmstudio-community/Qwen3.8-27B-GGUF`.
+- AUD-11: Architecture Coach now also supports a direct, loopback-only LM Studio provider. It uses LM Studio's OpenAI-compatible `v1/models` and schema-constrained `v1/chat/completions` endpoints without Codex CLI, plugins, tools, web access, or cloud fallback. Settings include a server model ID and default to the detected local Qwen identifier `qwen/qwen3.8-27b`.
 - The provider reports a clear readiness state when the local server is not started or the selected model has not been loaded. Its structured output, streaming, token usage, cancellation, timeout, malformed response and missing-model states have automated coverage.
 - AUD-02: deterministic quiz feedback now identifies the selected unsupported claim and explains why that kind of claim is unsupported, rather than repeating one generic sentence for every wrong option.
 - AUD-12: the total review deadline is checked at every stage and bounds both Archify render attempts and comparison rendering. Reaching it prevents review publication. Regression covers an expired total budget and one shared renderer budget.

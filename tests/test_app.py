@@ -328,13 +328,13 @@ def test_settings_local_provider_does_not_require_codex(tmp_path: Path, monkeypa
 def test_settings_lmstudio_provider_does_not_require_codex(tmp_path: Path, monkeypatch):
     from archcoach.lmstudio import LMStudioAdapter
     monkeypatch.setattr("archcoach.ai.CodexAdapter.status", lambda self: (_ for _ in ()).throw(AssertionError("Codex must not be inspected")))
-    monkeypatch.setattr(LMStudioAdapter, "models", lambda self: ["lmstudio-community/Qwen3.8-27B-GGUF"])
+    monkeypatch.setattr(LMStudioAdapter, "models", lambda self: ["qwen/qwen3.8-27b"])
     app, client = make_client(tmp_path)
-    response = client.patch("/api/settings", json={"ai_provider": "lmstudio", "codex_command": "missing-codex", "lmstudio_model": "lmstudio-community/Qwen3.8-27B-GGUF"}, headers={"X-ArchCoach-Token": app.state.csrf_token})
+    response = client.patch("/api/settings", json={"ai_provider": "lmstudio", "codex_command": "missing-codex", "lmstudio_model": "qwen/qwen3.8-27b"}, headers={"X-ArchCoach-Token": app.state.csrf_token})
     assert response.status_code == 200
     page = client.get("/settings?refresh=true")
     assert page.status_code == 200
-    assert "Local LM Studio ready: lmstudio-community/Qwen3.8-27B-GGUF" in page.text
+    assert "Local LM Studio ready: qwen/qwen3.8-27b" in page.text
     assert isinstance(app.state.worker.engine.codex, LMStudioAdapter)
 def test_conversation_endpoint_keeps_saved_review_boundary(tmp_path: Path):
     from archcoach.review import ReviewEngine

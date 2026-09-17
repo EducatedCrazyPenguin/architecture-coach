@@ -38,7 +38,7 @@ def fixture(tmp_path, monkeypatch, content='{"answer":"local","citations":[]}', 
     settings = replace(Settings.load(tmp_path / "data"), ai_provider="lmstudio", codex_command="does-not-exist")
     adapter = create_adapter(settings)
     assert isinstance(adapter, LMStudioAdapter)
-    monkeypatch.setattr(adapter, "models", lambda: ["lmstudio-community/Qwen3.8-27B-GGUF"])
+    monkeypatch.setattr(adapter, "models", lambda: ["qwen/qwen3.8-27b"])
     events = [
         "data: " + json.dumps({"choices": [{"delta": {"content": content}, "finish_reason": None}]}),
     ]
@@ -56,7 +56,7 @@ def test_lmstudio_structured_request_never_uses_codex(tmp_path, monkeypatch):
     events = []
     assert adapter.run_structured("Saved source only", schema, tmp_path, on_event=events.append)["answer"] == "local"
     body = json.loads(connection.requests[0][1]["body"])
-    assert body["model"] == "lmstudio-community/Qwen3.8-27B-GGUF"
+    assert body["model"] == "qwen/qwen3.8-27b"
     assert body["response_format"]["type"] == "json_schema"
     assert "tools" not in body
     assert adapter.last_usage == {"input_tokens": 12, "output_tokens": 5}
@@ -87,6 +87,6 @@ def test_lmstudio_cancellation_and_timeout_close_request(tmp_path, monkeypatch):
 def test_lmstudio_missing_model_explains_how_to_continue(tmp_path, monkeypatch):
     adapter, connection, schema = fixture(tmp_path, monkeypatch)
     monkeypatch.setattr(adapter, "models", lambda: [])
-    with pytest.raises(LMStudioUnavailable, match="Load lmstudio-community/Qwen3.8-27B-GGUF"):
+    with pytest.raises(LMStudioUnavailable, match="Load qwen/qwen3.8-27b"):
         adapter.run_structured("source", schema, tmp_path)
     assert adapter.status()["ready"] is False

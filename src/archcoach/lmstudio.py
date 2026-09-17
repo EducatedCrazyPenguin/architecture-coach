@@ -13,7 +13,7 @@ from .ai import CodexCancelledError, CodexError, CodexMalformedOutput, CodexTime
 from .config import Settings
 
 
-DEFAULT_MODEL = "lmstudio-community/Qwen3.8-27B-GGUF"
+DEFAULT_MODEL = "qwen/qwen3.8-27b"
 
 
 class LMStudioUnavailable(CodexUnavailable):
@@ -65,7 +65,7 @@ class LMStudioAdapter:
                 "selected_model": selected,
                 "message": (
                     f"Local LM Studio ready: {selected}. Codex CLI is not required."
-                    if ready else f"Model {selected} is not visible to LM Studio's server. Load it, or select an ID listed above."
+                    if ready else f"Model {selected} is not visible to LM Studio's server. Run: lms load {selected}; then start the LM Studio server, or select an ID listed above."
                 ),
             }
         except LMStudioUnavailable as exc:

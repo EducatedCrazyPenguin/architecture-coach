@@ -40,7 +40,7 @@ def review_configuration_fingerprint(project: dict, settings: Settings) -> str:
         "ai_provider": settings.ai_provider,
         "codex_model": settings.codex_model,
         "ollama_model": settings.ollama_model or "qwen3.6:27b",
-        "lmstudio_model": settings.lmstudio_model or "lmstudio-community/Qwen3.8-27B-GGUF",
+        "lmstudio_model": settings.lmstudio_model or "qwen/qwen3.8-27b",
         "reasoning_effort": settings.reasoning_effort,
         "source_packet_chars": settings.source_packet_chars,
         "source_packet_limit": settings.source_packet_limit,
