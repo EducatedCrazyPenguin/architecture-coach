@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .models import ProjectCreate, ProjectUpdate, utc_now
+from .ownership import DataDirectoryLock
 
 
 SCHEMA = """
@@ -110,6 +112,18 @@ class Store:
         self._migrate()
 
     def _migrate(self) -> None:
+        migration_lock = DataDirectoryLock(self.path.parent, "migration.lock")
+        deadline = time.monotonic() + 30
+        while not migration_lock.acquire():
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Another Architecture Coach process is still preparing this database")
+            time.sleep(0.05)
+        try:
+            self._migrate_exclusive()
+        finally:
+            migration_lock.release()
+
+    def _migrate_exclusive(self) -> None:
         existed = self.path.exists() and self.path.stat().st_size > 0
         with sqlite3.connect(self.path, timeout=30) as probe:
             version = probe.execute("PRAGMA user_version").fetchone()[0]
@@ -124,12 +138,22 @@ class Store:
         with sqlite3.connect(self.path, timeout=30) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
-            if version == 0:
-                conn.executescript(f"BEGIN IMMEDIATE;\n{SCHEMA}\nPRAGMA user_version=1;\nCOMMIT;")
-                version = 1
-            if version == 1:
-                conn.execute("BEGIN IMMEDIATE")
-                try:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                # Re-read after acquiring SQLite's write lock as a final safeguard.
+                # The data-directory migration lock prevents another app launch from
+                # taking a duplicate backup between this check and the migration.
+                version = conn.execute("PRAGMA user_version").fetchone()[0]
+                if version == 0:
+                    # sqlite3.executescript commits an open transaction first. Execute
+                    # this known schema statement-by-statement so the migration lock
+                    # remains held from version check through final commit.
+                    for statement in SCHEMA.split(";"):
+                        if statement.strip():
+                            conn.execute(statement)
+                    conn.execute("PRAGMA user_version=1")
+                    version = 1
+                if version == 1:
                     for statement in MIGRATION_2:
                         conn.execute(statement)
                     rows = conn.execute("SELECT id,path FROM projects").fetchall()
@@ -137,14 +161,8 @@ class Store:
                         conn.execute("UPDATE projects SET normalized_path=? WHERE id=?", (canonical_path(Path(project_path)), project_id))
                     conn.execute("CREATE UNIQUE INDEX projects_normalized_path_idx ON projects(normalized_path)")
                     conn.execute("PRAGMA user_version=2")
-                    conn.commit()
-                except Exception:
-                    conn.rollback()
-                    raise
-                version = 2
-            if version == 2:
-                conn.execute("BEGIN IMMEDIATE")
-                try:
+                    version = 2
+                if version == 2:
                     duplicates = conn.execute(
                         "SELECT project_id FROM jobs WHERE operation='review' AND status IN ('queued','running') "
                         "GROUP BY project_id HAVING COUNT(*) > 1"
@@ -162,24 +180,18 @@ class Store:
                     for statement in MIGRATION_3:
                         conn.execute(statement)
                     conn.execute("PRAGMA user_version=3")
-                    conn.commit()
-                except Exception:
-                    conn.rollback()
-                    raise
-                version = 3
-            if version == 3:
-                conn.execute("BEGIN IMMEDIATE")
-                try:
+                    version = 3
+                if version == 3:
                     for statement in MIGRATION_4:
                         conn.execute(statement)
                     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
-                    conn.commit()
-                except Exception:
-                    conn.rollback()
-                    raise
-                version = SCHEMA_VERSION
-            if version != SCHEMA_VERSION:
-                raise RuntimeError(f"Unsupported database schema version: {version}")
+                    version = SCHEMA_VERSION
+                if version != SCHEMA_VERSION:
+                    raise RuntimeError(f"Unsupported database schema version: {version}")
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

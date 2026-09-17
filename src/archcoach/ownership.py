@@ -8,8 +8,8 @@ from typing import BinaryIO
 class DataDirectoryLock:
     """An OS-backed, non-blocking lock scoped to one canonical data directory."""
 
-    def __init__(self, data_dir: Path):
-        self.path = data_dir.resolve() / "worker.lock"
+    def __init__(self, data_dir: Path, filename: str = "worker.lock"):
+        self.path = data_dir.resolve() / filename
         self.handle: BinaryIO | None = None
 
     def acquire(self) -> bool:

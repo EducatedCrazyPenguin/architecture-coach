@@ -62,3 +62,8 @@ Verification: **95 pytest tests passed**, **3 Edge browser scenarios passed**; J
 - AUD-02: deterministic quiz feedback now identifies the selected unsupported claim and explains why that kind of claim is unsupported, rather than repeating one generic sentence for every wrong option.
 - AUD-12: the total review deadline is checked at every stage and bounds both Archify render attempts and comparison rendering. Reaching it prevents review publication. Regression covers an expired total budget and one shared renderer budget.
 - **Prerequisite for real LM Studio acceptance:** start the LM Studio Developer server on `127.0.0.1:1234` and load the Qwen model. At this checkpoint the server was not running, so no private source was sent and no real-provider review is claimed.
+
+## Migration concurrency checkpoint
+
+- AUD-04: startup now takes a separate data-directory migration lock before reading a schema version, creating a backup, or applying a migration. The schema version is re-read after SQLite's write lock is acquired. A simultaneous second launcher waits and then observes the completed upgrade.
+- The legacy WAL-safe backup remains intact. A threaded regression verifies that two concurrent startups complete, produce one version-three backup, and leave the database at the current schema version.

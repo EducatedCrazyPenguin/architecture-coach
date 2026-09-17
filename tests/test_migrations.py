@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import threading
 from pathlib import Path
 
 from archcoach.db import SCHEMA, SCHEMA_VERSION, Store
@@ -82,3 +83,33 @@ def test_migration_backup_includes_committed_wal_data(tmp_path: Path):
             assert copied.execute("SELECT value_json FROM settings WHERE key='committed_marker'").fetchone()[0] == "1"
     finally:
         held.close()
+
+
+def test_concurrent_startup_migrates_once_and_takes_one_backup(tmp_path: Path):
+    database = tmp_path / "archcoach.db"
+    Store(database)
+    with sqlite3.connect(database) as conn:
+        conn.execute("DROP TABLE quiz_answers")
+        conn.execute("PRAGMA user_version=3")
+
+    barrier = threading.Barrier(2)
+    failures: list[BaseException] = []
+
+    def open_store() -> None:
+        try:
+            barrier.wait()
+            Store(database)
+        except BaseException as exc:
+            failures.append(exc)
+
+    workers = [threading.Thread(target=open_store) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=10)
+
+    assert not failures
+    assert all(not worker.is_alive() for worker in workers)
+    assert len(list((tmp_path / "backups").glob("archcoach-v3-*.db"))) == 1
+    with sqlite3.connect(database) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
