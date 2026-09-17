@@ -586,8 +586,6 @@ class ReviewEngine:
                     "architecture.json",
                     lambda raw: validate_architecture_snapshot(Architecture.model_validate(raw), capture["manifest"]),
                 )
-            except CodexTimeoutError:
-                raise
             except (CodexError, ValueError, json.JSONDecodeError) as exc:
                 check_cancelled()
                 ai_warnings.append(f"Architecture analysis used the deterministic fallback: {exc}")
@@ -644,8 +642,6 @@ class ReviewEngine:
                     "critique.json",
                     lambda raw: validate_critique_quality(Critique.model_validate(raw)),
                 )
-            except CodexTimeoutError:
-                raise
             except (CodexError, ValueError, json.JSONDecodeError) as exc:
                 check_cancelled()
                 ai_warnings.append(f"Critique used the deterministic fallback: {exc}")

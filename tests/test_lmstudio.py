@@ -58,9 +58,11 @@ def test_lmstudio_structured_request_never_uses_codex(tmp_path, monkeypatch):
     body = json.loads(connection.requests[0][1]["body"])
     assert body["model"] == "qwen/qwen3.8-27b"
     assert body["response_format"]["type"] == "json_schema"
+    assert body["messages"][1]["content"].endswith("/no_think")
     assert "tools" not in body
     assert adapter.last_usage == {"input_tokens": 12, "output_tokens": 5}
     assert events[-1]["type"] == "turn.completed"
+    assert [event["type"] for event in events].count("turn.completed") == 1
     assert connection.closed
 
 

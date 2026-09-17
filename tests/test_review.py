@@ -60,6 +60,23 @@ def test_expired_total_review_budget_does_not_publish_a_review(tmp_path: Path):
     assert store.list_reviews(project["id"]) == []
 
 
+def test_per_call_timeout_preserves_a_limited_static_review(tmp_path: Path):
+    source = tmp_path / "source"; source.mkdir()
+    (source / "app.py").write_text("value = 1\n", encoding="utf-8")
+    settings = Settings(data_dir=tmp_path / "data", app_dir=Path(__file__).parents[1] / "src" / "archcoach", review_timeout=60)
+    settings.ensure_dirs()
+    store = Store(settings.db_path)
+    project = store.add_project(ProjectCreate(path=str(source)))
+
+    class TimedOutCodex(OfflineCodex):
+        def run_structured(self, *args, **kwargs):
+            raise CodexTimeoutError("provider call timed out")
+
+    review = store.get_review(ReviewEngine(settings, store, TimedOutCodex()).run(project["id"]))
+    assert review["quality"] == "limited"
+    assert any("deterministic fallback" in warning for warning in review["artifacts"]["ai_warnings"])
+
+
 def test_chat_saves_snapshot_citations_and_marks_broken_evidence(tmp_path: Path):
     source = tmp_path / "source"; source.mkdir()
     (source / "app.py").write_text("def main():\n    return 'hello'\n", encoding="utf-8")
