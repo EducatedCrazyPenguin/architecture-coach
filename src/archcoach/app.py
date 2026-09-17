@@ -421,6 +421,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         codex_command: str = Form(),
         codex_model: str = Form(default=""),
         ollama_model: str = Form(default=""),
+        lmstudio_model: str = Form(default=""),
         reasoning_effort: str = Form(default="low"),
         codex_call_timeout: int = Form(default=300),
         review_timeout: int = Form(default=900),
@@ -432,6 +433,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             apply_app_settings(AppSettingsUpdate(
                 ai_provider=ai_provider, codex_command=codex_command,
                 codex_model=codex_model or None, ollama_model=ollama_model or None,
+                lmstudio_model=lmstudio_model or None,
                 reasoning_effort=reasoning_effort, codex_call_timeout=codex_call_timeout,
                 review_timeout=review_timeout, source_packet_chars=source_packet_chars,
                 source_packet_limit=source_packet_limit,

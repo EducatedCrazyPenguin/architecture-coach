@@ -58,6 +58,9 @@ def create_adapter(settings: Settings):
     if settings.ai_provider == "ollama":
         from .ollama import OllamaAdapter
         return OllamaAdapter(settings)
+    if settings.ai_provider == "lmstudio":
+        from .lmstudio import LMStudioAdapter
+        return LMStudioAdapter(settings)
     return CodexAdapter(settings)
 
 

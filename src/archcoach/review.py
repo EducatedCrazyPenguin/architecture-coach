@@ -10,7 +10,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
 
-from .ai import ARCHITECTURE_PROMPT, CRITIQUE_PROMPT, CHAT_PROMPT, CodexAdapter, CodexError, CodexMalformedOutput, create_adapter
+from .ai import ARCHITECTURE_PROMPT, CRITIQUE_PROMPT, CHAT_PROMPT, CodexAdapter, CodexError, CodexMalformedOutput, CodexTimeoutError, create_adapter
 from .analyze import analyze_snapshot, compact_analysis, manifest_changes
 from .capture import CaptureCancelled, capture_project, read_blob
 from .config import Settings
@@ -40,6 +40,7 @@ def review_configuration_fingerprint(project: dict, settings: Settings) -> str:
         "ai_provider": settings.ai_provider,
         "codex_model": settings.codex_model,
         "ollama_model": settings.ollama_model or "qwen3.6:27b",
+        "lmstudio_model": settings.lmstudio_model or "lmstudio-community/Qwen3.8-27B-GGUF",
         "reasoning_effort": settings.reasoning_effort,
         "source_packet_chars": settings.source_packet_chars,
         "source_packet_limit": settings.source_packet_limit,
@@ -125,6 +126,28 @@ def heuristic_architecture(project: dict, analysis: dict) -> Architecture:
     return Architecture(summary=summary, main_path=[], components=components, relationships=relationships)
 
 
+def _quiz_explanation(option: str, correct: str, fact: str) -> str:
+    if option == correct:
+        return f"Correct. {fact}"
+    claim = option.rstrip(".")
+    lowered = claim.casefold()
+    if "execut" in lowered or "run" in lowered or "passes" in lowered:
+        reason = "This review reads saved files without importing, executing, or testing the target project."
+    elif "runtime" in lowered or "always runs" in lowered or "execution order" in lowered:
+        reason = "Static analysis can confirm a source dependency, but it cannot prove runtime order."
+    elif "file size" in lowered or "largest" in lowered:
+        reason = "File size can prompt an inspection, but it does not establish code behavior, ownership, or execution order."
+    elif "all component" in lowered or "every source" in lowered:
+        reason = "Component membership comes from the saved architecture model; files are not automatically assigned everywhere."
+    elif "external" in lowered or "broken" in lowered or "failure" in lowered:
+        reason = "An unresolved reference is a limit of static resolution, not proof that a package or the project is broken."
+    elif "cycle" in lowered:
+        reason = "A cycle requires a closed chain of resolved dependencies; an individual import is not enough."
+    else:
+        reason = "That claim is not supported by the saved source evidence for this question."
+    return f"Not quite: “{claim}” is not supported. {reason} {fact}"
+
+
 def _quiz_question(identifier: str, question: str, correct: str, distractors: list[str], fact: str, evidence: list[Evidence], slot: int) -> QuizQuestion:
     options: list[str] = []
     for option in [correct, *distractors]:
@@ -136,10 +159,7 @@ def _quiz_question(identifier: str, question: str, correct: str, distractors: li
     selected = options.pop(0)
     correct_index = slot % 4
     options.insert(correct_index, selected)
-    explanations = [
-        f"Correct. {fact}" if index == correct_index else f"That option does not match this saved snapshot. {fact}"
-        for index in range(4)
-    ]
+    explanations = [_quiz_explanation(option, correct, fact) for option in options]
     return QuizQuestion(
         id=identifier, question=question, options=options, correct_index=correct_index,
         explanations=explanations, evidence=evidence,
@@ -408,8 +428,11 @@ class ReviewEngine:
         """Freeze effective configuration when work starts, including both AI passes."""
         engine = copy.copy(self)
         from .ollama import OllamaAdapter
+        from .lmstudio import LMStudioAdapter
         if isinstance(self.codex, OllamaAdapter):
             engine.codex = OllamaAdapter(engine.settings)
+        if isinstance(self.codex, LMStudioAdapter):
+            engine.codex = LMStudioAdapter(engine.settings)
         if isinstance(self.codex, CodexAdapter):
             engine.codex = copy.copy(self.codex)
             engine.codex.settings = engine.settings
@@ -430,13 +453,17 @@ class ReviewEngine:
     ) -> str:
         is_cancelled = cancelled or (lambda: False)
 
+        review_deadline = time.monotonic() + self.settings.review_timeout
+
         def check_cancelled() -> None:
             if is_cancelled():
                 self.codex.cancel()
                 raise ReviewCancelled("Review cancelled")
+            if time.monotonic() >= review_deadline:
+                self.codex.cancel()
+                raise CodexTimeoutError("Review exceeded its total time budget")
 
         project = self.store.get_project(project_id)
-        review_deadline = time.monotonic() + self.settings.review_timeout
         check_cancelled()
         progress(5, "Capturing current files")
         try:
@@ -556,6 +583,8 @@ class ReviewEngine:
                     "architecture.json",
                     lambda raw: validate_architecture_snapshot(Architecture.model_validate(raw), capture["manifest"]),
                 )
+            except CodexTimeoutError:
+                raise
             except (CodexError, ValueError, json.JSONDecodeError) as exc:
                 check_cancelled()
                 ai_warnings.append(f"Architecture analysis used the deterministic fallback: {exc}")
@@ -603,6 +632,8 @@ class ReviewEngine:
                     "critique.json",
                     lambda raw: validate_critique_quality(Critique.model_validate(raw)),
                 )
+            except CodexTimeoutError:
+                raise
             except (CodexError, ValueError, json.JSONDecodeError) as exc:
                 check_cancelled()
                 ai_warnings.append(f"Critique used the deterministic fallback: {exc}")
@@ -633,6 +664,7 @@ class ReviewEngine:
             artifacts = render_diagram(
                 self.settings, architecture, f"{project['name']} architecture", artifact_dir,
                 cancelled=is_cancelled, positions=positions,
+                timeout=max(0.01, review_deadline - time.monotonic()),
             )
             check_cancelled()
             artifacts["ai_warnings"] = ai_warnings
@@ -641,7 +673,7 @@ class ReviewEngine:
                 comparison = render_comparison(
                     self.settings, Path(previous["artifacts"]["architecture_ir"]),
                     Path(artifacts["architecture_ir"]), artifact_dir / "comparison.html",
-                    cancelled=is_cancelled,
+                    cancelled=is_cancelled, timeout=max(0.01, review_deadline - time.monotonic()),
                 )
                 if comparison:
                     artifacts["comparison"] = comparison

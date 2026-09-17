@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from archcoach.ai import CodexError
+import pytest
+
+from archcoach.ai import CodexError, CodexTimeoutError
 from archcoach.config import Settings
 from archcoach.db import Store
 from archcoach.models import ProjectCreate
@@ -43,6 +45,19 @@ def test_review_does_not_modify_project(tmp_path: Path):
     ReviewEngine(settings, store, OfflineCodex()).run(project["id"])
     assert file.read_bytes() == before
     assert sorted(item.name for item in source.iterdir()) == ["app.py"]
+
+
+def test_expired_total_review_budget_does_not_publish_a_review(tmp_path: Path):
+    source = tmp_path / "source"; source.mkdir()
+    (source / "app.py").write_text("value = 1\n", encoding="utf-8")
+    settings = Settings(data_dir=tmp_path / "data", app_dir=Path(__file__).parents[1] / "src" / "archcoach", review_timeout=0)
+    settings.ensure_dirs()
+    store = Store(settings.db_path)
+    project = store.add_project(ProjectCreate(path=str(source)))
+
+    with pytest.raises(CodexTimeoutError, match="total time budget"):
+        ReviewEngine(settings, store, OfflineCodex()).run(project["id"])
+    assert store.list_reviews(project["id"]) == []
 
 
 def test_chat_saves_snapshot_citations_and_marks_broken_evidence(tmp_path: Path):

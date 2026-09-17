@@ -4,6 +4,7 @@ import html
 import json
 import os
 import subprocess
+import time
 import shutil
 from collections import defaultdict, deque
 from collections.abc import Callable
@@ -100,6 +101,7 @@ def render_diagram(
     *,
     cancelled: Callable[[], bool] | None = None,
     positions: dict | None = None,
+    timeout: float = 120,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     ir_path = output_dir / "architecture.json"
@@ -108,6 +110,7 @@ def render_diagram(
     ir_path.write_text(json.dumps(ir, indent=2), encoding="utf-8")
     node = find_node()
     if settings.archify_cli.exists() and node:
+        deadline = time.monotonic() + timeout
         env = os.environ.copy(); env["ARCHIFY_UPDATE_CHECK_DISABLED"] = "1"
         last_error = ""
         for attempt in range(2):
@@ -117,7 +120,7 @@ def render_diagram(
             try:
                 result = run_cancellable(
                     [node, str(settings.archify_cli), "deliver", "architecture", str(ir_path), str(html_path), "--quality", "standard", "--json"],
-                    timeout=120, cancelled=cancelled, env=env,
+                    timeout=max(0.01, deadline - time.monotonic()), cancelled=cancelled, env=env,
                 )
                 if result.returncode == 0 and html_path.exists() and html_path.stat().st_size:
                     return {"diagram": str(html_path), "architecture_ir": str(ir_path), "renderer": "archify", "error": None, "attempts": attempt + 1}
@@ -254,6 +257,7 @@ def render_comparison(
     target: Path,
     *,
     cancelled: Callable[[], bool] | None = None,
+    timeout: float = 120,
 ) -> str | None:
     node = find_node()
     if not settings.archify_cli.exists() or not node:
@@ -262,7 +266,7 @@ def render_comparison(
     try:
         result = run_cancellable(
             [node, str(settings.archify_cli), "compare", "architecture", str(base_ir), str(head_ir), str(target), "--json"],
-            timeout=120, cancelled=cancelled, env=env,
+            timeout=timeout, cancelled=cancelled, env=env,
         )
     except ProcessCancelled:
         raise

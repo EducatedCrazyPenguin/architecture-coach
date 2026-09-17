@@ -15,6 +15,7 @@ class Settings:
     port: int = 8765
     codex_model: str | None = None
     ollama_model: str | None = "qwen3.6:27b"
+    lmstudio_model: str | None = "lmstudio-community/Qwen3.8-27B-GGUF"
     reasoning_effort: str = "low"
     codex_call_timeout: int = 300
     review_timeout: int = 900

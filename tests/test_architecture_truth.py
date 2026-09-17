@@ -28,6 +28,10 @@ def test_quiz_does_not_invent_definitions_or_mark_reciprocal_import_wrong():
     assert "No named definition was recorded" in quiz[0].options[quiz[0].correct_index]
     assert all("None of these" not in option for question in quiz for option in question.options)
     assert "b.py imports a.py" not in quiz[2].options
+    for question in quiz:
+        assert question.explanations[question.correct_index].startswith("Correct.")
+        assert len(set(question.explanations)) == 4
+        assert all(explanation.startswith("Not quite:") for index, explanation in enumerate(question.explanations) if index != question.correct_index)
 
 
 def test_cycle_witness_contains_only_actual_dependency_edges():

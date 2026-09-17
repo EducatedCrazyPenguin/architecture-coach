@@ -52,6 +52,24 @@ def test_renderer_timeout_repairs_layout_then_preserves_fallback(tmp_path: Path,
     assert attempts[0]["layout"] != attempts[1]["layout"]
 
 
+def test_renderer_shares_one_time_budget_between_repair_attempts(tmp_path: Path, monkeypatch):
+    import archcoach.diagram as diagram
+
+    settings = Settings(data_dir=tmp_path / "data", app_dir=Path(__file__).parents[1] / "src" / "archcoach")
+    monkeypatch.setattr(diagram, "find_node", lambda: "node")
+    observed: list[float] = []
+
+    def timeout(_command, **kwargs):
+        observed.append(kwargs["timeout"])
+        raise subprocess.TimeoutExpired("archify", kwargs["timeout"])
+
+    monkeypatch.setattr(diagram, "run_cancellable", timeout)
+    render_diagram(settings, architecture(), "Fixture", tmp_path / "out", timeout=0.2)
+    assert len(observed) == 2
+    assert observed[0] <= 0.2
+    assert observed[1] <= observed[0]
+
+
 def test_fallback_is_an_interactive_directed_graph(tmp_path: Path):
     target = tmp_path / "architecture.html"
 

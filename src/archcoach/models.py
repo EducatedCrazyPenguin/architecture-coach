@@ -194,10 +194,11 @@ class ProjectUpdate(BaseModel):
 
 
 class AppSettingsUpdate(BaseModel):
-    ai_provider: Literal["codex", "ollama"] | None = None
+    ai_provider: Literal["codex", "ollama", "lmstudio"] | None = None
     codex_command: str | None = Field(default=None, min_length=1, max_length=500)
     codex_model: str | None = Field(default=None, max_length=120)
     ollama_model: str | None = Field(default=None, max_length=120)
+    lmstudio_model: str | None = Field(default=None, max_length=200)
     reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None
     codex_call_timeout: int | None = Field(default=None, ge=30, le=1800)
     review_timeout: int | None = Field(default=None, ge=60, le=3600)
@@ -206,7 +207,7 @@ class AppSettingsUpdate(BaseModel):
 
     @model_validator(mode="after")
     def required_values_cannot_be_null(self):
-        nullable = {"codex_model", "ollama_model"}
+        nullable = {"codex_model", "ollama_model", "lmstudio_model"}
         invalid = sorted(
             field for field in self.model_fields_set
             if field not in nullable and getattr(self, field) is None
