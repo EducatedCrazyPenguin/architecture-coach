@@ -67,3 +67,8 @@ Verification: **95 pytest tests passed**, **3 Edge browser scenarios passed**; J
 
 - AUD-04: startup now takes a separate data-directory migration lock before reading a schema version, creating a backup, or applying a migration. The schema version is re-read after SQLite's write lock is acquired. A simultaneous second launcher waits and then observes the completed upgrade.
 - The legacy WAL-safe backup remains intact. A threaded regression verifies that two concurrent startups complete, produce one version-three backup, and leave the database at the current schema version.
+
+## Relationship evidence checkpoint
+
+- AUD-03: confirmed static relationships now preserve their reconciled import citation. The review renders that evidence beside every listed relationship. AI-provided citations are validated against the saved snapshot, while a claimed relationship without matching static support remains inferred and keeps the review limited.
+- Architecture output schemas now require relationship citations for new provider responses. Legacy reviews remain readable because relationship evidence is additive. Regression confirms fallback import arrows retain their source line and invalid relationship evidence is visibly unverified.

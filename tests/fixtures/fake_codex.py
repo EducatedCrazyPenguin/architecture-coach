@@ -99,7 +99,7 @@ if target:
                 {"id": "entry", "name": "Entry point", "kind": "backend", "responsibility": "Starts the synthetic service.", "sources": [{"path": "main.py", "line": 1, "end_line": 1, "label": "Entry point", "valid": True}], "source_paths": ["main.py"]},
                 *([{"id": "helper", "name": "Helper", "kind": "backend", "responsibility": "Provides the extracted greeting.", "sources": [{"path": "helper.py", "line": 1, "end_line": 1, "label": "Helper implementation", "valid": True}], "source_paths": ["helper.py"]}] if has_helper else []),
             ],
-            "relationships": ([{"source": "entry", "target": "helper", "label": "imports", "inferred": False}] if has_helper else []),
+            "relationships": ([{"source": "entry", "target": "helper", "kind": "imports", "label": "imports", "inferred": False, "sources": [{"path": "main.py", "line": 1, "end_line": 1, "label": "Import", "valid": True}]}] if has_helper else []),
         }),
         "critique.json": json.dumps({
             "strengths": ["The entry point is short and its responsibility is visible."],

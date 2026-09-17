@@ -34,6 +34,19 @@ def test_quiz_does_not_invent_definitions_or_mark_reciprocal_import_wrong():
         assert all(explanation.startswith("Not quite:") for index, explanation in enumerate(question.explanations) if index != question.correct_index)
 
 
+def test_confirmed_static_relationships_keep_their_import_evidence():
+    analysis = {
+        "files": [
+            {"path": "a.py", "language": "python", "lines": 3, "definitions": []},
+            {"path": "b.py", "language": "python", "lines": 1, "definitions": []},
+        ],
+        "edges": [{"source": "a.py", "target": "b.py", "kind": "imports", "line": 2}],
+    }
+    architecture = heuristic_architecture({"name": "Fixture"}, analysis)
+    assert architecture.relationships[0].sources[0].path == "a.py"
+    assert architecture.relationships[0].sources[0].line == 2
+
+
 def test_cycle_witness_contains_only_actual_dependency_edges():
     from archcoach.analyze import _strongly_connected_cycles
     graph = {"a": ["c"], "c": ["b"], "b": ["a"]}
@@ -79,12 +92,13 @@ def test_models_reject_duplicate_ids_and_dangling_references():
 def test_evidence_range_is_ordered_and_out_of_snapshot_range_is_unverified():
     with pytest.raises(ValueError, match="end_line"):
         Evidence(path="a.py", line=4, end_line=2)
-    architecture = Architecture(summary="x", components=[component("one", "a.py")])
+    architecture = Architecture(summary="x", components=[component("one", "a.py")], relationships=[Relationship(source="one", target="one", inferred=True, sources=[Evidence(path="a.py", line=4)])])
     architecture.components[0].sources[0].line = 4
 
     validate_evidence(architecture, [{"path": "a.py", "lines": 3}])
 
     assert architecture.components[0].sources[0].valid is False
+    assert architecture.relationships[0].sources[0].valid is False
 
 
 def test_fallback_does_not_invent_runtime_order_or_capture_strength():

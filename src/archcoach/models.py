@@ -47,6 +47,7 @@ class Relationship(BaseModel):
     kind: Literal["dependency", "imports", "calls", "reads", "writes", "publishes", "subscribes"] = "dependency"
     label: str = "uses"
     inferred: bool = False
+    sources: list[Evidence] = Field(default_factory=list, max_length=3)
 
 
 class Architecture(BaseModel):

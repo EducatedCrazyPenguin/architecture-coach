@@ -120,7 +120,10 @@ def heuristic_architecture(project: dict, analysis: dict) -> Architecture:
     for edge in analysis["edges"]:
         source, target = path_to_id.get(edge["source"]), path_to_id.get(edge["target"])
         if source and target and source != target and (source, target) not in seen:
-            seen.add((source, target)); relationships.append(Relationship(source=source, target=target, label=edge["kind"], kind="imports", inferred=False))
+            seen.add((source, target)); relationships.append(Relationship(
+                source=source, target=target, label=edge["kind"], kind="imports", inferred=False,
+                sources=[Evidence(path=edge["source"], line=edge.get("line", 1), label="Resolved static import")],
+            ))
     description = project.get("description") or f"{project['name']} contains {len(analysis['files'])} analysed source and supporting files."
     summary = f"{description} This limited static view confirms source dependencies; runtime execution order is unconfirmed."
     return Architecture(summary=summary, main_path=[], components=components, relationships=relationships)
@@ -233,7 +236,7 @@ def heuristic_critique(analysis: dict, architecture: Architecture | None = None)
 
 def validate_evidence(model, manifest: list[dict]):
     lines = {item["path"]: item["lines"] for item in manifest}
-    for collection in (getattr(model, "components", []), getattr(model, "findings", []), getattr(model, "lessons", []), getattr(model, "quiz", [])):
+    for collection in (getattr(model, "components", []), getattr(model, "findings", []), getattr(model, "lessons", []), getattr(model, "quiz", []), getattr(model, "relationships", [])):
         for item in collection:
             for evidence in item.sources if hasattr(item, "sources") else item.evidence:
                 actual = lines.get(evidence.path, 0)
@@ -597,16 +600,25 @@ class ReviewEngine:
                 for component in architecture.components
             }
             for relation in architecture.relationships:
-                supported = (relation.kind == "imports" or (relation.kind == "dependency" and relation.label.lower() in {"import", "imports"})) and any(
-                    edge["source"] in membership[relation.source]
+                supporting_edges = [
+                    edge for edge in analysis["edges"]
+                    if edge["source"] in membership[relation.source]
                     and edge["target"] in membership[relation.target]
-                    for edge in analysis["edges"]
+                ]
+                supported = (relation.kind == "imports" or (relation.kind == "dependency" and relation.label.lower() in {"import", "imports"})) and bool(
+                    supporting_edges
                 )
-                if not relation.inferred and not supported:
-                    relation.inferred = True
-                    ai_warnings.append(
-                        f"Relationship {relation.source} → {relation.target} is inferred: static analysis did not confirm its claimed semantics."
-                    )
+                if not relation.inferred:
+                    if not supported:
+                        relation.inferred = True
+                        ai_warnings.append(
+                            f"Relationship {relation.source} → {relation.target} is inferred: static analysis did not confirm its claimed semantics."
+                        )
+                    else:
+                        relation.sources = [
+                            Evidence(path=edge["source"], line=edge.get("line", 1), label="Resolved static import")
+                            for edge in supporting_edges[:3]
+                        ]
             identity_uncertainty: list[dict] = []
             if previous and previous_snapshot:
                 architecture, identity_uncertainty = preserve_component_identity(
@@ -640,7 +652,7 @@ class ReviewEngine:
                 ai_error_codes.append(getattr(exc, "code", "invalid_critique"))
                 critique = heuristic_critique(analysis, architecture)
             validate_evidence(critique, capture["manifest"])
-            cited_items = [*architecture.components, *critique.findings, *critique.lessons, *critique.quiz]
+            cited_items = [*architecture.components, *architecture.relationships, *critique.findings, *critique.lessons, *critique.quiz]
             invalid_count = sum(
                 not evidence.valid
                 for item in cited_items

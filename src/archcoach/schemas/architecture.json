@@ -125,7 +125,8 @@
         "target",
         "label",
         "inferred",
-        "kind"
+        "kind",
+        "sources"
       ],
       "properties": {
         "source": {
@@ -150,6 +151,13 @@
             "publishes",
             "subscribes"
           ]
+        },
+        "sources": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
         }
       }
     }
