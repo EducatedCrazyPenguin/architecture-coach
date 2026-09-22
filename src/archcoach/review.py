@@ -10,14 +10,14 @@ from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
 
-from .ai import ARCHITECTURE_PROMPT, CRITIQUE_PROMPT, CHAT_PROMPT, CodexAdapter, CodexError, CodexMalformedOutput, CodexTimeoutError, create_adapter
+from .ai import ARCHITECTURE_PROMPT, CRITIQUE_PROMPT, CHAT_PROMPT, SOURCE_SUMMARY_PROMPT, CodexAdapter, CodexError, CodexMalformedOutput, CodexTimeoutError, create_adapter
 from .analyze import analyze_snapshot, compact_analysis, manifest_changes
 from .capture import CaptureCancelled, capture_project, read_blob
 from .config import Settings
 from .context import bounded_history, build_source_packets
 from .db import JobCancelledError, Store
 from .diagram import render_comparison, render_diagram, stable_positions
-from .models import Architecture, ChatResponse, Component, Critique, Evidence, Finding, Lesson, QuizQuestion, Relationship, utc_now
+from .models import Architecture, ChatResponse, Component, Critique, Evidence, Finding, Lesson, QuizQuestion, Relationship, SourceSummary, utc_now
 from .subprocesses import ProcessCancelled
 
 
@@ -26,7 +26,7 @@ class ReviewCancelled(RuntimeError):
 
 
 ANALYSIS_FORMAT_VERSION = 2
-REVIEW_FORMAT_VERSION = 5
+REVIEW_FORMAT_VERSION = 6
 
 
 def review_configuration_fingerprint(project: dict, settings: Settings) -> str:
@@ -266,6 +266,14 @@ def validate_evidence_items(items: list[Evidence], manifest: list[dict]) -> list
             evidence.end_line is None or evidence.line <= evidence.end_line <= last_line
         )
     return items
+
+
+def validate_source_summary(raw: dict, manifest: list[dict], allowed_paths: set[str]) -> SourceSummary:
+    summary = SourceSummary.model_validate(raw)
+    summary.evidence = validate_evidence_items(summary.evidence, manifest)
+    if any(not item.valid or item.path not in allowed_paths for item in summary.evidence):
+        raise ValueError("Source summary cited evidence outside its packet")
+    return summary
 
 
 def validate_critique_quality(critique: Critique) -> Critique:
@@ -530,6 +538,14 @@ class ReviewEngine:
             self.settings, capture["manifest"], analysis,
             changed_paths=changed_paths, anchors=previous_anchors,
         )
+        analysis_context = compact_analysis(analysis)
+        bounded_facts = [
+            f"{name} {limit['included']}/{limit['total']}"
+            for name, limit in analysis_context["context_limits"].items()
+            if limit["included"] < limit["total"]
+        ]
+        if bounded_facts:
+            source_note += " Static analysis context was bounded: " + ", ".join(bounded_facts) + "."
         coverage["ai_source_context"] = source_note
         usage_total: dict[str, int] = {}
 
@@ -541,8 +557,8 @@ class ReviewEngine:
                     fields["usage_json"] = {key: usage_total.get(key, 0) + value for key, value in usage.items() if isinstance(value, int)}
                 self.store.update_job(job_id, **fields)
 
-        def run_pass(prompt: str, schema_name: str, validator):
-            for attempt in range(2):
+        def run_pass(prompt: str, schema_name: str, validator, *, repairs: int = 1):
+            for attempt in range(repairs + 1):
                 check_cancelled()
                 remaining = int(review_deadline - time.monotonic())
                 if remaining <= 0:
@@ -556,7 +572,7 @@ class ReviewEngine:
                     )
                     return validator(raw)
                 except (ValueError, CodexMalformedOutput) as exc:
-                    if attempt:
+                    if attempt >= repairs:
                         raise
                     prompt += f"\n\nYour prior response failed validation: {exc}. Return one corrected response matching the schema."
                 finally:
@@ -576,12 +592,30 @@ class ReviewEngine:
                 ai_warnings.append("AI inspected only part of the captured source. " + source_note)
             progress(25, "Building architecture")
             check_cancelled()
+            final_source_packets = source_packets
+            packet_items = [item for item in re.split(r"\n\n(?=SOURCE PACKET \d+\n)", source_packets) if item]
+            needs_summaries = len(packet_items) > 1 or "Omitted " in source_note or "Partially included:" in source_note
             try:
+                if needs_summaries:
+                    summaries = []
+                    for index, packet in enumerate(packet_items, 1):
+                        allowed_paths = set(re.findall(r"^--- FILE (.+?) ---$", packet, re.MULTILINE))
+                        summary = run_pass(
+                            SOURCE_SUMMARY_PROMPT.format(source_packet=packet),
+                            "source_summary.json",
+                            lambda raw, paths=allowed_paths: validate_source_summary(raw, capture["manifest"], paths),
+                            repairs=0,
+                        )
+                        evidence = ", ".join(f"{item.path}:{item.line}" for item in summary.evidence)
+                        summaries.append(f"SOURCE SUMMARY {index}\n{summary.summary}\nEvidence: {evidence}")
+                    final_source_packets = "\n\n".join(summaries)
+                    source_note += f" Final review passes used {len(summaries)} validated source summaries."
+                    coverage["ai_source_context"] = source_note
                 architecture = run_pass(
                     ARCHITECTURE_PROMPT.format(
                         description=project["description"], goal=project["goal"],
-                        coverage=json.dumps(coverage), analysis=json.dumps(compact_analysis(analysis)),
-                        source_note=source_note, source_packets=source_packets,
+                        coverage=json.dumps(coverage), analysis=json.dumps(analysis_context),
+                        source_note=source_note, source_packets=final_source_packets,
                     ),
                     "architecture.json",
                     lambda raw: validate_architecture_snapshot(Architecture.model_validate(raw), capture["manifest"]),
@@ -591,6 +625,8 @@ class ReviewEngine:
                 ai_warnings.append(f"Architecture analysis used the deterministic fallback: {exc}")
                 ai_error_codes.append(getattr(exc, "code", "invalid_architecture"))
                 architecture = heuristic_architecture(project, analysis)
+                if needs_summaries:
+                    final_source_packets = "Source summaries were unavailable; use the static analysis and fallback architecture above."
             check_cancelled()
             validate_architecture_snapshot(architecture, capture["manifest"])
             membership = {
@@ -637,7 +673,7 @@ class ReviewEngine:
                     CRITIQUE_PROMPT.format(
                         goal=project["goal"], changes=json.dumps(changes),
                         architecture=architecture.model_dump_json(), source_note=source_note,
-                        source_packets=source_packets,
+                        source_packets=final_source_packets,
                     ),
                     "critique.json",
                     lambda raw: validate_critique_quality(Critique.model_validate(raw)),

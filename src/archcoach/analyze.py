@@ -430,8 +430,32 @@ def manifest_changes(before: dict[str, list[dict]], after: dict[str, list[dict]]
 
 
 def compact_analysis(analysis: dict, limit_files: int = 250) -> dict:
+    coverage = analysis.get("coverage", {})
     return {
         **analysis,
         "files": analysis["files"][:limit_files],
+        "edges": analysis["edges"][:500],
+        "cycles": analysis["cycles"][:50],
         "unresolved_imports": analysis["unresolved_imports"][:50],
+        "manifests": {
+            path: declarations[:100]
+            for path, declarations in sorted(analysis["manifests"].items())[:20]
+        },
+        "coverage": {
+            **coverage,
+            "per_file": coverage.get("per_file", [])[:limit_files],
+            "omissions": coverage.get("omissions", [])[:100],
+        },
+        "context_limits": {
+            key: {"included": min(len(values), limit), "total": len(values)}
+            for key, values, limit in (
+                ("files", analysis["files"], limit_files),
+                ("edges", analysis["edges"], 500),
+                ("cycles", analysis["cycles"], 50),
+                ("unresolved_imports", analysis["unresolved_imports"], 50),
+                ("manifests", analysis["manifests"], 20),
+                ("per_file_coverage", coverage.get("per_file", []), limit_files),
+                ("coverage_omissions", coverage.get("omissions", []), 100),
+            )
+        },
     }

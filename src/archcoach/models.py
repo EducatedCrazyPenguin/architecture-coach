@@ -119,6 +119,12 @@ class QuizQuestion(BaseModel):
         return self
 
 
+class SourceSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    summary: str = Field(min_length=1)
+    evidence: list[Evidence] = Field(min_length=1, max_length=12)
+
+
 class Critique(BaseModel):
     model_config = ConfigDict(extra="forbid")
     strengths: list[str] = Field(default_factory=list)

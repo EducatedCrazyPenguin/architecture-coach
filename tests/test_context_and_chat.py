@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,44 @@ def test_source_packets_are_deterministic_prioritised_and_bounded(tmp_path: Path
     assert packets.count("SOURCE PACKET") <= 2
     assert packets.index("package.json") < packets.index("file0.py")
     assert "Omitted" in note
+
+
+def test_large_review_summarises_bounded_packets_before_final_passes(tmp_path: Path):
+    source = tmp_path / "large-source"
+    source.mkdir()
+    (source / "app.py").write_text("value = 1\n" * 20, encoding="utf-8")
+    for index in range(8):
+        (source / f"module_{index}.py").write_text(f"unique_payload_{index} = {index}\n" * 20, encoding="utf-8")
+    settings = Settings(
+        data_dir=tmp_path / "data", app_dir=Path(__file__).parents[1] / "src" / "archcoach",
+        source_packet_chars=300, source_packet_limit=2,
+    )
+    settings.ensure_dirs()
+    store = Store(settings.db_path)
+    project = store.add_project(ProjectCreate(path=str(source)))
+
+    class SummarisingCodex(CompleteCodex):
+        def __init__(self):
+            self.calls = []
+
+        def run_structured(self, prompt, schema, *args, **kwargs):
+            self.calls.append((schema.name, prompt))
+            if schema.name == "source_summary.json":
+                path = re.search(r"--- FILE (.+?) ---", prompt).group(1)
+                return {
+                    "summary": f"Saved facts from {path}.",
+                    "evidence": [{"path": path, "line": 1, "end_line": 1, "label": "Packet evidence", "valid": True}],
+                }
+            return super().run_structured(prompt, schema, *args, **kwargs)
+
+    codex = SummarisingCodex()
+    review_id = ReviewEngine(settings, store, codex).run(project["id"])
+
+    assert [name for name, _ in codex.calls].count("source_summary.json") == 2
+    architecture_prompt = next(prompt for name, prompt in codex.calls if name == "architecture.json")
+    assert "SOURCE SUMMARY 1" in architecture_prompt
+    assert "--- FILE" not in architecture_prompt
+    assert "validated source summaries" in store.get_review(review_id)["artifacts"]["source_context"]
 
 
 def test_chat_history_obeys_message_and_character_budgets(tmp_path: Path):

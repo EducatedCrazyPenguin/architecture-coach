@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from archcoach.analyze import _strongly_connected_cycles, analyze_snapshot, manifest_changes
+from archcoach.analyze import _strongly_connected_cycles, analyze_snapshot, compact_analysis, manifest_changes
 from archcoach.capture import capture_project
 from archcoach.config import Settings
 
@@ -18,6 +18,29 @@ def analyze_project(tmp_path: Path, files: dict[str, str]) -> dict:
     settings.ensure_dirs()
     captured = capture_project(settings, {"path": str(project), "exclusions": []})
     return analyze_snapshot(settings, captured["manifest"])
+
+
+def test_compact_analysis_bounds_every_large_collection():
+    analysis = {
+        "files": [{"path": f"f{i}.py"} for i in range(300)],
+        "edges": [{"source": f"f{i}.py", "target": "app.py"} for i in range(600)],
+        "cycles": [[f"f{i}.py", "app.py", f"f{i}.py"] for i in range(80)],
+        "unresolved_imports": [{"path": f"f{i}.py"} for i in range(100)],
+        "manifests": {f"m{i}.json": [{"name": str(j)} for j in range(120)] for i in range(30)},
+        "coverage": {"per_file": [{"path": f"f{i}.py"} for i in range(300)], "omissions": [str(i) for i in range(150)]},
+    }
+
+    compact = compact_analysis(analysis)
+
+    assert len(compact["files"]) == 250
+    assert len(compact["edges"]) == 500
+    assert len(compact["cycles"]) == 50
+    assert len(compact["unresolved_imports"]) == 50
+    assert len(compact["manifests"]) == 20
+    assert all(len(items) == 100 for items in compact["manifests"].values())
+    assert len(compact["coverage"]["per_file"]) == 250
+    assert len(compact["coverage"]["omissions"]) == 100
+    assert compact["context_limits"]["edges"] == {"included": 500, "total": 600}
 
 
 def test_python_packages_relative_imports_and_src_layout(tmp_path: Path):

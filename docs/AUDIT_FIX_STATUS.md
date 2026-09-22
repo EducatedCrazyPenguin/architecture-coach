@@ -83,3 +83,9 @@ Verification: **95 pytest tests passed**, **3 Edge browser scenarios passed**; J
 
 - The failed full-review server log showed an 18,424-token request reaching a model instance loaded with only 16,384 tokens of context. The adapter now inspects LM Studio's native model state and loads or reloads the selected model with a 32,768-token context before requesting structured output.
 - Regression coverage exercises the exact 16,384 → 32,768 reload path. **107 pytest tests pass.** The current machine's LM Studio daemon did not restart during this checkpoint, so the corrected full real review remains pending.
+
+## Large-project context checkpoint
+
+- AUD-09: small reviews still send their bounded saved source directly. Reviews with multiple, truncated, or omitted packets now make one schema-constrained summary call per selected packet, up to the existing six-packet limit, before the architecture and critique passes.
+- Summary citations must exist in the saved snapshot and inside the packet being summarized. Final passes receive only the validated summaries, and the saved coverage note discloses their use. Static facts are separately capped for files, edges, cycles, unresolved imports, manifests, and per-file coverage. Review format 6 prevents older large-project output from being silently reused.
+- Verification: **109 pytest tests pass.** Regressions use large synthetic snapshots, confirm raw packet text does not reach the final architecture pass, and bound every collection included from static analysis.
