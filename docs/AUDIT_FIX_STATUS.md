@@ -78,3 +78,8 @@ Verification: **95 pytest tests passed**, **3 Edge browser scenarios passed**; J
 - The installed LM Studio CLI reports the downloaded model as `qwen/qwen3.8-27b` (Q4_K_M). The local server was started on `127.0.0.1:1234` and exposed that ID through `v1/models`.
 - A real, source-free schema request succeeded through the direct adapter. LM Studio did not report streamed token usage, so the application correctly leaves usage unavailable rather than inventing a value.
 - A first complete disposable two-file review exceeded the configured per-call budget before the Qwen no-thinking prompt was placed correctly. Per-call timeouts now fall back to a limited static review when overall review time remains; only the total deadline prevents publication. Qwen's documented `/no_think` directive is now appended to its user prompt, and a fresh real structured request completed successfully. A full real review using this corrected placement remains the next acceptance check.
+
+## LM Studio context checkpoint
+
+- The failed full-review server log showed an 18,424-token request reaching a model instance loaded with only 16,384 tokens of context. The adapter now inspects LM Studio's native model state and loads or reloads the selected model with a 32,768-token context before requesting structured output.
+- Regression coverage exercises the exact 16,384 → 32,768 reload path. **107 pytest tests pass.** The current machine's LM Studio daemon did not restart during this checkpoint, so the corrected full real review remains pending.

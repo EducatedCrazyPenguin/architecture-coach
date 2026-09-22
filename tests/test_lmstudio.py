@@ -39,6 +39,7 @@ def fixture(tmp_path, monkeypatch, content='{"answer":"local","citations":[]}', 
     adapter = create_adapter(settings)
     assert isinstance(adapter, LMStudioAdapter)
     monkeypatch.setattr(adapter, "models", lambda: ["qwen/qwen3.8-27b"])
+    monkeypatch.setattr(adapter, "_ensure_model_context", lambda model, timeout: None)
     events = [
         "data: " + json.dumps({"choices": [{"delta": {"content": content}, "finish_reason": None}]}),
     ]
@@ -48,6 +49,35 @@ def fixture(tmp_path, monkeypatch, content='{"answer":"local","citations":[]}', 
     connection = Connection(io.BytesIO(("\n\n".join(events) + "\n\n").encode()))
     monkeypatch.setattr(adapter, "_connection", lambda timeout: connection)
     return adapter, connection, settings.schema_dir / "chat.json"
+
+
+def test_lmstudio_reloads_a_small_context_model_with_enough_context(tmp_path, monkeypatch):
+    settings = replace(Settings.load(tmp_path / "data"), ai_provider="lmstudio")
+    adapter = LMStudioAdapter(settings)
+    listing = Connection(io.BytesIO(json.dumps({
+        "models": [{
+            "key": "qwen/qwen3.8-27b", "max_context_length": 262_144,
+            "loaded_instances": [{"id": "qwen-small", "config": {"context_length": 16_384}}],
+        }],
+    }).encode()))
+    unloading = Connection(io.BytesIO(json.dumps({"instance_id": "qwen-small"}).encode()))
+    loading = Connection(io.BytesIO(json.dumps({"status": "loaded", "load_config": {"context_length": 32_768}}).encode()))
+    responses = [listing, unloading, loading]
+    timeouts = []
+    moments = iter((0, 0, 10, 20))
+    monkeypatch.setattr("archcoach.lmstudio.time.monotonic", lambda: next(moments))
+    monkeypatch.setattr(adapter, "_connection", lambda timeout: (timeouts.append(timeout), responses.pop(0))[1])
+
+    adapter._ensure_model_context("qwen/qwen3.8-27b", 60)
+
+    assert listing.requests[0][0][:2] == ("GET", "/api/v1/models")
+    assert unloading.requests[0][0][:2] == ("POST", "/api/v1/models/unload")
+    assert json.loads(unloading.requests[0][1]["body"]) == {"instance_id": "qwen-small"}
+    assert loading.requests[0][0][:2] == ("POST", "/api/v1/models/load")
+    assert json.loads(loading.requests[0][1]["body"]) == {
+        "model": "qwen/qwen3.8-27b", "context_length": 32_768, "echo_load_config": True,
+    }
+    assert timeouts == [3, 50, 40]
 
 
 def test_lmstudio_structured_request_never_uses_codex(tmp_path, monkeypatch):
