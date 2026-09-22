@@ -66,7 +66,7 @@ def test_renderer_shares_one_time_budget_between_repair_attempts(tmp_path: Path,
     monkeypatch.setattr(diagram, "run_cancellable", timeout)
     render_diagram(settings, architecture(), "Fixture", tmp_path / "out", timeout=0.2)
     assert len(observed) == 2
-    assert observed[0] <= 0.2
+    assert observed[0] <= 0.2 + 1e-9
     assert observed[1] <= observed[0]
 
 

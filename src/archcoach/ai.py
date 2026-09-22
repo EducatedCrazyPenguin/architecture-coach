@@ -195,6 +195,16 @@ class CodexAdapter:
             return CodexUsageError(message)
         return CodexError(message)
 
+    @staticmethod
+    def _event_failure(event: dict) -> str | None:
+        event_type = str(event.get("type", "")).lower()
+        if "error" not in event_type and "fail" not in event_type:
+            return None
+        detail = event.get("message") or event.get("error")
+        if isinstance(detail, dict):
+            detail = detail.get("message") or detail.get("detail") or detail
+        return str(detail or event)
+
     def run_structured(
         self,
         prompt: str,
@@ -238,6 +248,7 @@ class CodexAdapter:
         self.last_event_at = time.monotonic()
         stdout_queue: queue.Queue[str | None] = queue.Queue()
         stderr_lines: list[str] = []
+        event_failures: list[str] = []
         input_errors: list[BaseException] = []
         deadline = time.monotonic() + timeout
         try:
@@ -293,13 +304,17 @@ class CodexAdapter:
                 usage = self._usage_from_event(event)
                 if usage:
                     self.last_usage = usage
+                failure = self._event_failure(event)
+                if failure:
+                    event_failures.append(failure)
                 if on_event:
                     on_event(event)
             stdout_thread.join(2)
             stderr_thread.join(2)
             stdin_thread.join(2)
             if process.returncode != 0:
-                raise self._classify_failure("".join(stderr_lines), process.returncode)
+                detail = "\n".join(event_failures) or "".join(stderr_lines)
+                raise self._classify_failure(detail, process.returncode)
             if input_errors:
                 raise CodexError(f"Codex stopped accepting the request: {input_errors[0]}")
             try:

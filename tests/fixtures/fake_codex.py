@@ -58,6 +58,10 @@ if mode == "fail":
 if mode == "usage":
     print("usage limit exhausted", file=sys.stderr)
     raise SystemExit(4)
+if mode == "event_fail":
+    print("harmless shell warning", file=sys.stderr)
+    print(json.dumps({"type": "turn.failed", "error": {"message": "structured execution failure"}}), flush=True)
+    raise SystemExit(5)
 if mode == "stall":
     time.sleep(60)
 if mode == "spawn_child":

@@ -89,3 +89,10 @@ Verification: **95 pytest tests passed**, **3 Edge browser scenarios passed**; J
 - AUD-09: small reviews still send their bounded saved source directly. Reviews with multiple, truncated, or omitted packets now make one schema-constrained summary call per selected packet, up to the existing six-packet limit, before the architecture and critique passes.
 - Summary citations must exist in the saved snapshot and inside the packet being summarized. Final passes receive only the validated summaries, and the saved coverage note discloses their use. Static facts are separately capped for files, edges, cycles, unresolved imports, manifests, and per-file coverage. Review format 6 prevents older large-project output from being silently reused.
 - Verification: **109 pytest tests pass.** Regressions use large synthetic snapshots, confirm raw packet text does not reach the final architecture pass, and bound every collection included from static analysis.
+
+## Authenticated Codex checkpoint
+
+- A real authenticated Codex review of a disposable two-file fixture completed with full quality and no warnings. It produced two components, one confirmed dependency, one lesson, and ten repository-specific questions.
+- The job reported 26,983 input tokens and 3,300 output tokens. No fixture source, model output, personal path, or operational log is committed.
+- Failed Codex subprocesses now prefer the structured error from the JSON event stream over unrelated stderr warnings, so the dashboard shows the actionable cause.
+- Verification: **110 pytest tests pass.** The renderer deadline regression also tolerates sub-nanosecond floating-point rounding without weakening its shared-budget assertion.

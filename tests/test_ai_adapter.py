@@ -11,6 +11,7 @@ import pytest
 from archcoach.ai import (
     CodexAdapter,
     CodexAuthenticationError,
+    CodexError,
     CodexIncompatible,
     CodexMalformedOutput,
     CodexTimeoutError,
@@ -69,6 +70,14 @@ def test_adapter_classifies_failures(tmp_path: Path, monkeypatch, mode, error):
     codex, workspace = adapter(tmp_path)
     monkeypatch.setenv("FAKE_CODEX_MODE", mode)
     with pytest.raises(error):
+        codex.run_structured("x", SCHEMA_DIR / "chat.json", workspace)
+
+
+def test_adapter_prefers_streamed_failure_over_stderr_warning(tmp_path: Path, monkeypatch):
+    codex, workspace = adapter(tmp_path)
+    monkeypatch.setenv("FAKE_CODEX_MODE", "event_fail")
+
+    with pytest.raises(CodexError, match="structured execution failure"):
         codex.run_structured("x", SCHEMA_DIR / "chat.json", workspace)
 
 
