@@ -19,4 +19,4 @@
 
 ## 4. Acceptance
 - [x] 4.1 Run fixture browser journey and real Codex plus one available local-provider generation.
-- [ ] 4.2 Review privacy, run Windows checks, and publish tested commit.
+- [x] 4.2 Review privacy, run Windows checks, and publish tested commit.

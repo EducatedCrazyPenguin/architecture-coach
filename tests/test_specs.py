@@ -19,7 +19,7 @@ def test_snapshot_specs_distinguish_main_proposed_archived_and_malformed(tmp_pat
     (source / "openspec" / "changes" / "new-greeting").mkdir(parents=True)
     (source / "openspec" / "changes" / "archive" / "old-greeting").mkdir(parents=True)
     (source / "openspec" / "specs" / "greeting" / "spec.md").write_text(
-        "# Greeting\n\n### Requirement: Say hello\nThe app SHALL greet.\n\n#### Scenario: Basic\n- WHEN launched\n- THEN it greets\n", encoding="utf-8",
+        "# Greeting\n\n### Requirement: Say hello\nThe app SHALL greet.\n\n#### Scenario: Basic\n- WHEN launched\n- THEN it greets\n\n### Requirement: Say hello\nDuplicate title.\n\n#### Scenario: Duplicate\n- WHEN launched\n- THEN it greets\n", encoding="utf-8",
     )
     (source / "openspec" / "changes" / "new-greeting" / "proposal.md").write_text("proposed", encoding="utf-8")
     (source / "openspec" / "changes" / "archive" / "old-greeting" / "proposal.md").write_text("old", encoding="utf-8")
@@ -34,6 +34,7 @@ def test_snapshot_specs_distinguish_main_proposed_archived_and_malformed(tmp_pat
     assert index["active_changes"] == ["new-greeting"]
     assert index["archived_changes"] == ["old-greeting"]
     assert any("broken/spec.md" in issue for issue in index["malformed"])
+    assert any("duplicate requirement" in issue for issue in index["malformed"])
     (source / "openspec" / "config.yaml").write_text("schema: custom\n", encoding="utf-8")
     unsupported = index_specs(settings, capture_project(settings, {"path": str(source), "exclusions": []})["manifest"])
     assert unsupported["requirements"] == []

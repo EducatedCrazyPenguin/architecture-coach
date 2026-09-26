@@ -16,6 +16,7 @@ def index_specs(settings, manifest: list[dict]) -> dict:
     result = {"version": SPEC_INDEX_VERSION, "requirements": [], "active_changes": [], "archived_changes": [], "malformed": [], "unsupported": []}
     changes: set[str] = set()
     archived: set[str] = set()
+    seen_requirements: set[str] = set()
     for item in manifest:
         path = item["path"]
         if path == "openspec/config.yaml":
@@ -43,8 +44,13 @@ def index_specs(settings, manifest: list[dict]) -> dict:
             if not re.search(r"^#### Scenario:", body, re.MULTILINE) or not re.search(r"\bWHEN\b", body) or not re.search(r"\bTHEN\b", body):
                 result["malformed"].append(f"{path}:{line}: requirement needs a WHEN/THEN scenario")
                 continue
+            requirement_id = f"{capability}:{title}"
+            if requirement_id in seen_requirements:
+                result["malformed"].append(f"{path}:{line}: duplicate requirement name")
+                continue
+            seen_requirements.add(requirement_id)
             result["requirements"].append({
-                "id": f"{capability}:{title}", "capability": capability, "title": title,
+                "id": requirement_id, "capability": capability, "title": title,
                 "path": path, "line": line, "end_line": end, "text": body[:4000],
             })
     result["active_changes"] = sorted(changes)
