@@ -6,6 +6,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 
 class ProcessCancelled(RuntimeError):
@@ -54,11 +55,12 @@ def run_cancellable(
     cancelled: Callable[[], bool] | None = None,
     input_text: str | None = None,
     env: dict[str, str] | None = None,
+    cwd: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     process = subprocess.Popen(
         list(command), stdin=subprocess.PIPE if input_text is not None else None,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
-        errors="replace", env=env, **process_group_options(),
+        errors="replace", env=env, cwd=cwd, **process_group_options(),
     )
     result: list[tuple[str, str]] = []
     failure: list[BaseException] = []

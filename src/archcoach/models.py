@@ -125,12 +125,21 @@ class SourceSummary(BaseModel):
     evidence: list[Evidence] = Field(min_length=1, max_length=12)
 
 
+class RequirementAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    requirement_id: str = Field(min_length=1)
+    status: Literal["supported", "possible_gap", "uncertain"]
+    explanation: str = Field(min_length=1)
+    code_evidence: list[Evidence] = Field(default_factory=list, max_length=5)
+
+
 class Critique(BaseModel):
     model_config = ConfigDict(extra="forbid")
     strengths: list[str] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list, max_length=5)
     lessons: list[Lesson] = Field(default_factory=list, max_length=3)
     quiz: list[QuizQuestion] = Field(default_factory=list, max_length=10)
+    requirements: list[RequirementAssessment] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
     def identifiers_are_unique(self):
@@ -143,6 +152,9 @@ class Critique(BaseModel):
             raise ValueError("Lesson IDs must be unique")
         if len(quiz_ids) != len(set(quiz_ids)):
             raise ValueError("Quiz question IDs must be unique")
+        requirement_ids = [item.requirement_id for item in self.requirements]
+        if len(requirement_ids) != len(set(requirement_ids)):
+            raise ValueError("Requirement assessments must be unique")
         return self
 
 
@@ -232,6 +244,43 @@ class ChatResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     answer: str = Field(min_length=1, max_length=12000)
     citations: list[Evidence] = Field(default_factory=list, max_length=12)
+
+
+class PlanSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    capability: str = Field(pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$", max_length=80)
+    content: str = Field(min_length=80, max_length=16000)
+
+
+class PlanRequest(BaseModel):
+    finding_id: str = Field(min_length=1, max_length=100)
+    instruction: str = Field(default="", max_length=2000)
+    parent_id: str | None = None
+
+
+class PlanApproval(BaseModel):
+    draft_hash: str = Field(min_length=64, max_length=64)
+
+
+class ImprovementPlanDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    change_id: str = Field(pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$", max_length=80)
+    kind: Literal["behavior_change", "refactor"]
+    proposal: str = Field(min_length=80, max_length=12000)
+    design: str = Field(min_length=80, max_length=16000)
+    tasks: str = Field(min_length=80, max_length=12000)
+    specs: list[PlanSpec] = Field(default_factory=list, max_length=3)
+    evidence: list[Evidence] = Field(min_length=1, max_length=8)
+
+    @model_validator(mode="after")
+    def spec_matches_kind(self):
+        if self.kind == "refactor" and self.specs:
+            raise ValueError("A pure refactor must not invent specification changes")
+        if self.kind == "behavior_change" and not self.specs:
+            raise ValueError("A behavior change needs a specification delta")
+        if len({item.capability for item in self.specs}) != len(self.specs):
+            raise ValueError("Specification capability paths must be distinct")
+        return self
 
 
 class LessonStatusRequest(BaseModel):

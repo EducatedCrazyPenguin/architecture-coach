@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["change_id", "kind", "proposal", "design", "tasks", "specs", "evidence"],
+  "properties": {
+    "change_id": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 80},
+    "kind": {"enum": ["behavior_change", "refactor"]},
+    "proposal": {"type": "string", "maxLength": 12000},
+    "design": {"type": "string", "maxLength": 16000},
+    "tasks": {"type": "string", "maxLength": 12000},
+    "specs": {"type": "array", "maxItems": 3, "items": {"type": "object", "additionalProperties": false, "required": ["capability", "content"], "properties": {"capability": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 80}, "content": {"type": "string", "maxLength": 16000}}}},
+    "evidence": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "object", "additionalProperties": false, "required": ["path", "line", "end_line", "label", "valid"], "properties": {"path": {"type": "string"}, "line": {"type": "integer", "minimum": 1}, "end_line": {"type": ["integer", "null"], "minimum": 1}, "label": {"type": "string"}, "valid": {"type": "boolean"}}}}
+  }
+}

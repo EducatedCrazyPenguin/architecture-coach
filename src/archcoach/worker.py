@@ -86,6 +86,24 @@ class Worker:
                         message="Complete", result_json={"conversation_id": conversation_id},
                         finished_at=utc_now(),
                     )
+                elif job["operation"] == "plan":
+                    from .plans import PlanService
+
+                    selected = self.engine._job_engine()
+                    plan_id = PlanService(selected.settings, self.store, selected.codex).generate(
+                        job["review_id"], job["payload"]["finding_id"],
+                        job["payload"].get("instruction", ""),
+                        parent_id=job["payload"].get("parent_id"),
+                        cancelled=cancelled, job_id=job["id"],
+                    )
+                    if cancelled():
+                        raise ReviewCancelled("Plan cancelled")
+                    plan = self.store.get_plan(plan_id)
+                    self.store.update_job(
+                        job["id"], status="complete", stage="complete", progress=100,
+                        message="Plan ready" if plan["status"] == "ready" else "Plan needs revision",
+                        result_json={"plan_id": plan_id}, finished_at=utc_now(),
+                    )
                 else:
                     raise ValueError(f"Unknown job operation: {job['operation']}")
             except ReviewCancelled:

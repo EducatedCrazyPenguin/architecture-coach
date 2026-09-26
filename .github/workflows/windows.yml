@@ -22,5 +22,6 @@ jobs:
       - run: python -m pip install -r requirements.lock
       - run: python -m pip install --no-deps --no-build-isolation -e .
       - run: pnpm install --frozen-lockfile
+      - run: pnpm spec:check
       - run: pytest -p no:cacheprovider -q
       - run: pnpm test:browser

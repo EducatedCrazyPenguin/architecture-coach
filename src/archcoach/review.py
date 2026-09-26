@@ -19,14 +19,15 @@ from .db import JobCancelledError, Store
 from .diagram import render_comparison, render_diagram, stable_positions
 from .models import Architecture, ChatResponse, Component, Critique, Evidence, Finding, Lesson, QuizQuestion, Relationship, SourceSummary, utc_now
 from .subprocesses import ProcessCancelled
+from .specs import index_specs, select_requirements
 
 
 class ReviewCancelled(RuntimeError):
     pass
 
 
-ANALYSIS_FORMAT_VERSION = 2
-REVIEW_FORMAT_VERSION = 6
+ANALYSIS_FORMAT_VERSION = 3
+REVIEW_FORMAT_VERSION = 7
 
 
 def review_configuration_fingerprint(project: dict, settings: Settings) -> str:
@@ -61,7 +62,7 @@ def heuristic_architecture(project: dict, analysis: dict) -> Architecture:
     code_files = [file for file in all_files if Path(file["path"]).suffix.lower() in code_suffixes]
     # Documentation and manifests inform the review but are not runtime components
     # when the snapshot contains source code.
-    architecture_files = code_files or all_files
+    architecture_files = code_files or [file for file in all_files if not file["path"].startswith("openspec/")]
     grouped: dict[str, list[dict]] = {}
     for file in architecture_files:
         parts = file["path"].split("/")
@@ -251,7 +252,8 @@ def validate_evidence(model, manifest: list[dict]):
 def validate_architecture_snapshot(architecture: Architecture, manifest: list[dict]) -> Architecture:
     known = {item["path"] for item in manifest}
     invalid_membership = sorted({
-        path for component in architecture.components for path in component.source_paths if path not in known
+        path for component in architecture.components for path in component.source_paths
+        if path not in known or path.startswith("openspec/")
     })
     if invalid_membership:
         raise ValueError(f"Component membership refers to files outside the snapshot: {invalid_membership}")
@@ -282,6 +284,20 @@ def validate_critique_quality(critique: Critique) -> Critique:
         raise ValueError("Codex did not have enough source access to complete the critique")
     if len(critique.quiz) != 10:
         raise ValueError("The repository quiz must contain exactly 10 questions")
+    return critique
+
+
+def validate_requirement_assessments(critique: Critique, selected: list[dict], manifest: list[dict]) -> Critique:
+    expected = {item["id"] for item in selected}
+    actual = {item.requirement_id for item in critique.requirements}
+    if actual != expected:
+        raise ValueError("Requirement assessments did not match the selected saved requirements")
+    for assessment in critique.requirements:
+        validate_evidence_items(assessment.code_evidence, manifest)
+        if any(not item.valid or item.path.startswith("openspec/") for item in assessment.code_evidence):
+            raise ValueError("Requirement assessment has invalid code evidence")
+        if assessment.status != "uncertain" and not assessment.code_evidence:
+            raise ValueError("A supported or possible-gap assessment needs inspected code evidence")
     return critique
 
 
@@ -516,6 +532,7 @@ class ReviewEngine:
             analysis = analyze_snapshot(self.settings, capture["manifest"], cancelled=is_cancelled)
         except ProcessCancelled as exc:
             raise ReviewCancelled(str(exc)) from exc
+        analysis["specifications"] = index_specs(self.settings, capture["manifest"])
         check_cancelled()
         coverage = {**analysis["coverage"], "capture_omissions": capture["omissions"], "unstable": capture["unstable"]}
         snapshot_id = self.store.create_snapshot(
@@ -534,6 +551,13 @@ class ReviewEngine:
             for path in (component_data.get("source_paths") or [item.get("path") for item in component_data.get("sources", [])])
             if path
         }
+        selected_requirements, unassessed_count = select_requirements(
+            analysis["specifications"], changed_paths, previous_anchors,
+        )
+        requirement_context = [
+            {"id": item["id"], "path": item["path"], "line": item["line"], "text": item["text"][:2000]}
+            for item in selected_requirements
+        ]
         source_packets, source_note = build_source_packets(
             self.settings, capture["manifest"], analysis,
             changed_paths=changed_paths, anchors=previous_anchors,
@@ -673,16 +697,21 @@ class ReviewEngine:
                     CRITIQUE_PROMPT.format(
                         goal=project["goal"], changes=json.dumps(changes),
                         architecture=architecture.model_dump_json(), source_note=source_note,
+                        requirements=json.dumps(requirement_context),
                         source_packets=final_source_packets,
                     ),
                     "critique.json",
-                    lambda raw: validate_critique_quality(Critique.model_validate(raw)),
+                    lambda raw: validate_requirement_assessments(
+                        validate_critique_quality(Critique.model_validate(raw)), selected_requirements, capture["manifest"],
+                    ),
                 )
             except (CodexError, ValueError, json.JSONDecodeError) as exc:
                 check_cancelled()
                 ai_warnings.append(f"Critique used the deterministic fallback: {exc}")
                 ai_error_codes.append(getattr(exc, "code", "invalid_critique"))
                 critique = heuristic_critique(analysis, architecture)
+            if unassessed_count:
+                ai_warnings.append(f"{unassessed_count} documented requirements were outside this review's assessment limit.")
             validate_evidence(critique, capture["manifest"])
             cited_items = [*architecture.components, *architecture.relationships, *critique.findings, *critique.lessons, *critique.quiz]
             invalid_count = sum(

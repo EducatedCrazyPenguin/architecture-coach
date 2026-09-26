@@ -3,9 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "spec:check": "node tools/openspec.mjs validate --all --strict --json",
+    "spec:progress": "node tools/openspec.mjs progress"
   },
   "devDependencies": {
+    "@fission-ai/openspec": "1.13.2",
     "@playwright/test": "1.55.0",
     "htmx.org": "2.0.8",
     "typescript": "6.0.2"

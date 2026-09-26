@@ -99,6 +99,14 @@ test("project review, lesson, chat, settings, and comparison use saved evidence"
   await expect(page.getByRole("link", { name: "main.py:1" }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Repository quiz" })).toBeVisible();
   await expect(page.locator(".quiz-card")).toHaveCount(10);
+  await page.getByRole("button", { name: "Create improvement plan" }).first().click();
+  await expect(page.getByRole("link", { name: "Inspect plan" })).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("link", { name: "Inspect plan" }).click();
+  await expect(page.getByRole("heading", { name: "Exact planning files" })).toBeVisible();
+  await expect(page.getByText("proposal.md", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Approve and save planning files" }).click();
+  await expect(page.getByText("Planning files were saved.", { exact: false })).toBeVisible();
+  await page.getByRole("link", { name: "Review finding" }).click();
   const firstQuestion = page.locator(".quiz-card").first();
   await page.getByRole("button", {name:"Ask instructor", exact:true}).click();
   await page.locator("#chat textarea").fill("Keep this unsent question.");

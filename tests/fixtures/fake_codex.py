@@ -110,6 +110,14 @@ if target:
             "findings": [{"id": "separate-greeting", "severity": "low", "title": "Keep greeting logic cohesive", "observation": "The greeting is owned by the entry module.", "why_it_matters": "A clear owner makes future behavior easier to find.", "improvement": "Extract it only when another caller needs the same behavior.", "tradeoffs": "An early extraction would add a module without immediate value.", "evidence": [{"path": "main.py", "line": 1, "end_line": 1, "label": "Greeting entry", "valid": True}]}],
             "lessons": [{"id": "cohesion", "title": "Cohesion", "explanation": "Code that changes for the same reason usually belongs together.", "code_example": "def greet(): return 'hello'", "self_check": "When should this move to a helper?", "answer": "When a second responsibility or caller makes the boundary useful.", "exercise": "Name the reason this function is likely to change.", "evidence": [{"path": "main.py", "line": 1, "end_line": 1, "label": "Small cohesive example", "valid": True}]}],
             "quiz": quiz,
+            "requirements": [],
+        }),
+        "improvement_plan.json": json.dumps({
+            "change_id": "extract-greeting", "kind": "refactor",
+            "proposal": "# Proposal\n\n## Why\nKeep the greeting owner easy to find.\n\n## What Changes\nExtract greeting formatting.\n\n## Capabilities\nNo behavior change.\n\n## Impact\nOnly the entry point changes.\n",
+            "design": "# Design\n\n## Context\nThe greeting currently sits in the entry point.\n\n## Goals / Non-Goals\nPreserve exact output.\n\n## Decisions\nUse one pure helper.\n\n## Risks / Trade-offs\nAn extra function adds navigation.\n",
+            "tasks": "# Tasks\n\n- [ ] 1. Extract greeting formatting in main.py while preserving output.\n- [ ] 2. Run the existing tests and record evidence that output is unchanged.\n",
+            "specs": [], "evidence": [{"path": "main.py", "line": 1, "end_line": 1, "label": "Greeting entry", "valid": True}],
         }),
         "chat.json": json.dumps({"answer": "The saved entry point owns the current greeting behavior.", "citations": [{"path": "main.py", "line": 1, "end_line": 1, "label": "Saved entry point", "valid": True}]}),
     }

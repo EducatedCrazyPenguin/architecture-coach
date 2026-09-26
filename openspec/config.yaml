@@ -1,0 +1,26 @@
+schema: spec-driven
+context: |
+  Architecture Coach is a personal Windows app using Python 3.12, FastAPI,
+  Jinja2, HTMX, CSS and SQLite. The Node toolchain supports Archify,
+  TypeScript analysis, browser tests and OpenSpec; Python remains the app core.
+  Keep capture, analysis, AI providers, rendering, storage and presentation separate.
+  Reviews, citations and conversations belong to immutable captured snapshots.
+  Normal review and chat operations never write to registered project folders.
+  Keep private source, snapshots, logs and personal paths out of this public repo.
+  Run focused pytest checks, then pytest and Playwright before publishing.
+  Preserve old saved reviews through versioned migrations and compatibility readers.
+rules:
+  proposal:
+    - State the user-visible change and keep it scoped to one real problem.
+  specs:
+    - Distinguish observed code from proposed behavior and cite acceptance scenarios.
+  tasks:
+    - Include a verification step for each behavior change; check it only after passing.
+operations:
+  apply:
+    guidance:
+      - Keep target projects unchanged during review, chat, and automated tests.
+      - Record tested commands and outcomes in verification.md before checking tasks.
+  archive:
+    guidance:
+      - Confirm OpenSpec validation, pytest, browser checks and commit evidence.

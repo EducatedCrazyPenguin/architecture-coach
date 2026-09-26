@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS quiz_answers (
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);
 """
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 MIGRATION_2 = (
     "ALTER TABLE projects ADD COLUMN normalized_path TEXT",
     "ALTER TABLE projects ADD COLUMN last_attempted_at TEXT",
@@ -94,6 +94,10 @@ MIGRATION_3 = (
 )
 MIGRATION_4 = (
     "CREATE TABLE IF NOT EXISTS quiz_answers (review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, question_id TEXT NOT NULL, selected_index INTEGER NOT NULL, correct INTEGER NOT NULL, answered_at TEXT NOT NULL, PRIMARY KEY(review_id, question_id))",
+)
+MIGRATION_5 = (
+    "CREATE TABLE IF NOT EXISTS improvement_plans (id TEXT PRIMARY KEY, review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, finding_id TEXT NOT NULL, parent_id TEXT, job_id TEXT, created_at TEXT NOT NULL, status TEXT NOT NULL, draft_json TEXT NOT NULL, draft_hash TEXT NOT NULL, validation_json TEXT NOT NULL, provider_json TEXT NOT NULL, receipt_json TEXT NOT NULL DEFAULT '{}')",
+    "CREATE INDEX IF NOT EXISTS improvement_plans_review_idx ON improvement_plans(review_id,created_at DESC)",
 )
 
 
@@ -183,6 +187,11 @@ class Store:
                     version = 3
                 if version == 3:
                     for statement in MIGRATION_4:
+                        conn.execute(statement)
+                    conn.execute("PRAGMA user_version=4")
+                    version = 4
+                if version == 4:
+                    for statement in MIGRATION_5:
                         conn.execute(statement)
                     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
                     version = SCHEMA_VERSION
@@ -553,6 +562,50 @@ class Store:
             "requested" if result["cancel_requested"] else "none"
         )
         return result
+
+    def create_plan(
+        self, review_id: str, finding_id: str, draft: dict, draft_hash: str,
+        validation: dict, provider: dict, *, parent_id: str | None = None,
+        job_id: str | None = None,
+    ) -> str:
+        plan_id = uuid.uuid4().hex
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO improvement_plans(id,review_id,finding_id,parent_id,job_id,created_at,status,draft_json,draft_hash,validation_json,provider_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (plan_id, review_id, finding_id, parent_id, job_id, utc_now(),
+                 "ready" if validation.get("valid") else "needs_revision", json.dumps(draft),
+                 draft_hash, json.dumps(validation), json.dumps(provider)),
+            )
+        return plan_id
+
+    def get_plan(self, plan_id: str) -> dict[str, Any]:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM improvement_plans WHERE id=?", (plan_id,)).fetchone()
+        result = self._row(row)
+        if not result:
+            raise KeyError(plan_id)
+        return result
+
+    def list_plans(self, review_id: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM improvement_plans WHERE review_id=? ORDER BY created_at DESC", (review_id,)).fetchall()
+        return [self._row(row) for row in rows]
+
+    def publish_plan_receipt(self, plan_id: str, draft_hash: str, receipt: dict) -> dict[str, Any]:
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT status,draft_hash,receipt_json FROM improvement_plans WHERE id=?", (plan_id,)).fetchone()
+            if not row:
+                raise KeyError(plan_id)
+            if row["draft_hash"] != draft_hash:
+                raise ValueError("Displayed plan revision no longer matches")
+            if row["status"] not in {"ready", "published"}:
+                raise ValueError("Only validated plans may be saved")
+            previous = json.loads(row["receipt_json"])
+            if previous and previous != receipt:
+                raise ValueError("This plan was already saved elsewhere")
+            conn.execute("UPDATE improvement_plans SET status='published',receipt_json=? WHERE id=?", (json.dumps(receipt), plan_id))
+        return receipt
 
     def get_app_settings(self) -> dict[str, Any]:
         with self.connect() as conn:

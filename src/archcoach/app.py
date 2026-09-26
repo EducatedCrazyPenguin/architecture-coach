@@ -13,7 +13,7 @@ from urllib.parse import urlencode
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from pydantic import ValidationError
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -21,7 +21,8 @@ from .ai import CodexAdapter, create_adapter
 from .config import Settings, merge_saved_settings
 from .db import Store
 from .diagram import render_selected_comparison
-from .models import AppSettingsUpdate, ChatRequest, LessonStatusRequest, ProjectCreate, ProjectUpdate, QuizAnswerRequest
+from .models import AppSettingsUpdate, ChatRequest, ImprovementPlanDraft, LessonStatusRequest, PlanApproval, PlanRequest, ProjectCreate, ProjectUpdate, QuizAnswerRequest
+from .plans import PlanConflict, PlanError, PlanService, download_zip, plan_files
 from .capture import CaptureError, fingerprint_project
 from .review import ReviewEngine, compare_saved_reviews, source_text, validate_comparison_records
 from .worker import Worker
@@ -124,7 +125,67 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         except KeyError: raise HTTPException(404)
         conversation = store.conversation_for_review(review_id)
         quiz_answers = store.quiz_answers(review_id)
-        return templates.TemplateResponse(request=request, name="review.html", context=context(request, page="review", project=project, review=review, snapshot=snapshot, lesson_statuses=store.lesson_statuses(review_id), quiz_answers=quiz_answers, quiz_score=sum(item["correct"] for item in quiz_answers.values()), conversation=conversation, current_status="checking"))
+        return templates.TemplateResponse(request=request, name="review.html", context=context(request, page="review", project=project, review=review, snapshot=snapshot, plans=store.list_plans(review_id), lesson_statuses=store.lesson_statuses(review_id), quiz_answers=quiz_answers, quiz_score=sum(item["correct"] for item in quiz_answers.values()), conversation=conversation, current_status="checking"))
+
+    def enqueue_plan(review_id: str, data: PlanRequest) -> str:
+        try:
+            review = store.get_review(review_id)
+            if data.parent_id:
+                parent = store.get_plan(data.parent_id)
+                if (parent["review_id"], parent["finding_id"]) != (review_id, data.finding_id):
+                    raise HTTPException(409, "Revision belongs to another finding")
+        except KeyError:
+            raise HTTPException(404, "Review or previous plan not found")
+        if review["status"] not in {"complete", "unchanged"}:
+            raise HTTPException(409, "A saved completed review is required")
+        if not any(item.get("id") == data.finding_id for item in review["critique"].get("findings", [])):
+            raise HTTPException(404, "Finding not found in this review")
+        return store.enqueue("plan", None, data.model_dump(), review_id=review_id, priority=5)
+
+    def plan_details(plan_id: str):
+        try:
+            plan = store.get_plan(plan_id)
+            review = store.get_review(plan["review_id"])
+            project = store.get_project(review["project_id"])
+        except KeyError:
+            raise HTTPException(404, "Plan not found")
+        return plan, review, project
+
+    @app.get("/plans/{plan_id}", response_class=HTMLResponse)
+    def plan_page(plan_id: str, request: Request, saved: bool = False):
+        plan, review, project = plan_details(plan_id)
+        try:
+            files = plan_files(ImprovementPlanDraft.model_validate(plan["draft"]))
+        except ValidationError:
+            files = {}
+        return templates.TemplateResponse(request=request, name="plan.html", context=context(request, page="plan", project=project, review=review, plan=plan, files=files, saved=saved))
+
+    @app.get("/plans/{plan_id}/download")
+    def plan_download(plan_id: str):
+        plan, _, _ = plan_details(plan_id)
+        if plan["status"] not in {"ready", "published"}:
+            raise HTTPException(409, "This draft does not validate yet")
+        return Response(download_zip(plan), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="openspec-plan-{plan_id[:12]}.zip"'})
+
+    @app.post("/plans/{plan_id}/publish")
+    def publish_plan(plan_id: str, request: Request, draft_hash: str = Form(), csrf: str = Form(alias="_csrf")):
+        require_local(request, csrf)
+        try:
+            PlanService(app.state.settings, store, codex).publish(plan_id, draft_hash)
+        except KeyError:
+            raise HTTPException(404)
+        except PlanConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except PlanError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return RedirectResponse(url=f"/plans/{plan_id}?saved=true", status_code=303)
+
+    @app.post("/plans/{plan_id}/revise")
+    def revise_plan(plan_id: str, request: Request, instruction: str = Form(max_length=2000), csrf: str = Form(alias="_csrf")):
+        require_local(request, csrf)
+        plan, _, _ = plan_details(plan_id)
+        job_id = enqueue_plan(plan["review_id"], PlanRequest(finding_id=plan["finding_id"], instruction=instruction, parent_id=plan_id))
+        return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
 
     def comparison(project_id: str, before_id: str | None, after_id: str | None):
         project = store.get_project(project_id)
@@ -227,6 +288,15 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         except KeyError: raise HTTPException(404)
         job_id = store.enqueue("chat", None, {"message": message}, review_id=review_id, priority=1)
         return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
+
+    @app.post("/reviews/{review_id}/plans")
+    def create_plan_form(review_id: str, request: Request, finding_id: str = Form(), instruction: str = Form(default=""), csrf: str = Form(alias="_csrf")):
+        require_local(request, csrf)
+        try:
+            data = PlanRequest(finding_id=finding_id, instruction=instruction)
+        except ValidationError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return RedirectResponse(url=f"/jobs/{enqueue_plan(review_id, data)}", status_code=303)
 
     @app.post("/reviews/{review_id}/lessons/{lesson_id}")
     async def lesson_status(review_id: str, lesson_id: str, request: Request):
@@ -367,6 +437,30 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         try: store.get_review(review_id)
         except KeyError: raise HTTPException(404)
         return {"job_id": store.enqueue("chat", None, data.model_dump(), review_id=review_id, priority=1)}
+
+    @app.post("/api/reviews/{review_id}/plans", status_code=202)
+    def api_create_plan(review_id: str, data: PlanRequest, request: Request):
+        require_local(request)
+        return {"job_id": enqueue_plan(review_id, data)}
+
+    @app.get("/api/reviews/{review_id}/plans")
+    def api_review_plans(review_id: str):
+        try: store.get_review(review_id)
+        except KeyError: raise HTTPException(404)
+        return store.list_plans(review_id)
+
+    @app.get("/api/plans/{plan_id}")
+    def api_plan(plan_id: str):
+        plan, _, _ = plan_details(plan_id)
+        return plan
+
+    @app.post("/api/plans/{plan_id}/publish")
+    def api_publish_plan(plan_id: str, data: PlanApproval, request: Request):
+        require_local(request)
+        try: return PlanService(app.state.settings, store, codex).publish(plan_id, data.draft_hash)
+        except KeyError: raise HTTPException(404)
+        except PlanConflict as exc: raise HTTPException(409, str(exc)) from exc
+        except PlanError as exc: raise HTTPException(422, str(exc)) from exc
 
     @app.get("/api/reviews/{review_id}/conversation")
     def api_conversation(review_id: str):

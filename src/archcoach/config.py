@@ -54,6 +54,10 @@ class Settings:
     def archify_cli(self) -> Path:
         return self.app_dir.parent.parent / "vendor" / "archify" / "archify" / "bin" / "archify.mjs"
 
+    @property
+    def openspec_cli(self) -> Path:
+        return self.app_dir.parent.parent / "node_modules" / "@fission-ai" / "openspec" / "bin" / "openspec.js"
+
     def ensure_dirs(self) -> None:
         for path in (self.data_dir, self.blob_dir, self.artifact_dir, self.runtime_dir):
             path.mkdir(parents=True, exist_ok=True)

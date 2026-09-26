@@ -1,6 +1,6 @@
 # Architecture Coach
 
-Architecture Coach is a private, local dashboard that turns your current project files into an architecture map, a short design review, and lessons grounded in your own source code. It stores every snapshot under `%LOCALAPPDATA%\ArchCoach` and never writes to registered project folders.
+Architecture Coach is a private, local dashboard that turns your current project files into an architecture map, a short design review, and lessons grounded in your own source code. It stores every snapshot under `%LOCALAPPDATA%\ArchCoach`. Reviews and chat do not edit registered projects; a separate, explicit approval can save a new OpenSpec planning folder.
 
 ## Install and start on Windows
 
@@ -30,6 +30,9 @@ The app binds only to `127.0.0.1:8765`. Use **Exit app** in the sidebar to stop 
 - Up to five practical findings with evidence, impact, a small improvement, and tradeoffs.
 - A ten-question repository quiz with four choices, source evidence, saved progress, and an explanation for every selected answer.
 - A conversation tied to that immutable review snapshot.
+- When a project has standard OpenSpec specifications, a separate requirements view with tentative, cited implementation assessments.
+
+Beside a finding, **Create improvement plan** asks the selected Codex, Ollama, or LM Studio provider for one focused OpenSpec change. Inspect its exact proposal, design, tasks, and specification deltas before using **Approve and save planning files**. Approval creates only a new `openspec/changes/<change-id>/` folder in the registered project after rechecking the saved source and Git context. It never implements, archives, commits, or pushes that project's change. You can download the draft or copy a Codex handoff instead.
 
 The app uses the saved Codex CLI login and runs review sessions read-only. On Windows it discovers the CLI included with the Codex desktop app even when the launcher has a narrower PATH. Ollama and LM Studio connect directly to their local APIs, independently of Codex CLI. Select either local provider in Settings and choose its installed or loaded model. Reviews and instructor chat use that local model; there is no automatic cloud fallback. If the selected provider is unavailable, the app produces a clearly simpler deterministic review from static analysis. Reviews never run or import target project code.
 
@@ -58,8 +61,12 @@ python -m pip install -r requirements.lock
 python -m pip install -e . --no-deps --no-build-isolation
 pnpm install --frozen-lockfile
 pytest
+pnpm spec:check
+pnpm spec:progress
 archcoach doctor
 ```
+
+OpenSpec 1.13.2 is pinned in `package.json` and `pnpm-lock.yaml`. New cross-module features and architecture changes use a focused change under `openspec/changes/` with a proposal, specification delta when behavior changes, design, tasks, and verification notes. The generated Codex workflow skills live in `.agents/skills/`; project guidance is in `openspec/config.yaml`. `pnpm spec:check` runs strict validation with telemetry and update checks disabled. `pnpm spec:progress` reports checked task counts, remaining tasks, and recorded blockers. The first-release ledger and audit documents remain dated history.
 
 The application is divided into capture, static analysis, Codex, review, diagram, persistence, worker, and web layers. JSON schemas under `src/archcoach/schemas` constrain Codex output.
 
