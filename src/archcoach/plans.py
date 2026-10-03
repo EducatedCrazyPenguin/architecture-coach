@@ -214,7 +214,7 @@ class PlanService:
             review_id, finding_id, draft_data, file_hash(draft_data), validation,
             {
                 "provider": self.settings.ai_provider,
-                "model": self.settings.codex_model if self.settings.ai_provider == "codex" else self.settings.ollama_model if self.settings.ai_provider == "ollama" else self.settings.lmstudio_model,
+                "model": getattr(self.provider, "model", None) or getattr(self.settings, f"{self.settings.ai_provider}_model"),
                 "format_version": PLAN_FORMAT_VERSION,
                 "project_id": project["id"], "snapshot_id": snapshot["id"],
                 "source_fingerprint": snapshot["fingerprint"], "git": snapshot["git"],

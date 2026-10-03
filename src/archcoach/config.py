@@ -16,6 +16,7 @@ class Settings:
     codex_model: str | None = None
     ollama_model: str | None = "qwen3.6:27b"
     lmstudio_model: str | None = "qwen/qwen3.8-27b"
+    prism_model: str | None = "ternary-bonsai-2-27b"
     reasoning_effort: str = "low"
     codex_call_timeout: int = 300
     review_timeout: int = 900

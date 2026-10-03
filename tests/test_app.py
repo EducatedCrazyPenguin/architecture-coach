@@ -334,8 +334,38 @@ def test_settings_lmstudio_provider_does_not_require_codex(tmp_path: Path, monke
     assert response.status_code == 200
     page = client.get("/settings?refresh=true")
     assert page.status_code == 200
-    assert "Local LM Studio ready: qwen/qwen3.8-27b" in page.text
+    assert "Local LM Studio detected: qwen/qwen3.8-27b" in page.text
     assert isinstance(app.state.worker.engine.codex, LMStudioAdapter)
+
+
+def test_local_model_lists_are_independent_cached_and_selection_persists(tmp_path, monkeypatch):
+    from archcoach.ai import CodexAdapter
+    from archcoach.lmstudio import LMStudioAdapter
+    from archcoach.ollama import OllamaAdapter
+    from archcoach.prism import PrismAdapter, PrismUnavailable
+    seen = []
+    monkeypatch.setattr(CodexAdapter, "status", lambda self: {"provider": "codex", "authenticated": True, "message": "Synthetic login", "command": "fake"})
+    monkeypatch.setattr(LMStudioAdapter, "models", lambda self: seen.append("lmstudio") or ["ternary-bonsai-2-27b", "qwen/qwen3.8-27b"])
+    monkeypatch.setattr(OllamaAdapter, "models", lambda self: seen.append("ollama") or ["ollama-only:27b"])
+    monkeypatch.setattr(PrismAdapter, "models", lambda self: (_ for _ in ()).throw(PrismUnavailable("server stopped")))
+    app, client = make_client(tmp_path)
+    page = client.get("/settings").text
+    lmstudio_list = page.split('<datalist id="lmstudio-models">')[1].split('</datalist>')[0]
+    ollama_list = page.split('<datalist id="ollama-models">')[1].split('</datalist>')[0]
+    assert "ternary-bonsai-2-27b" in lmstudio_list
+    assert "ollama-only" not in lmstudio_list
+    assert "ternary-bonsai" not in ollama_list
+    assert "prism discovery unavailable: server stopped" in page
+    client.get("/settings")
+    assert seen == ["ollama", "lmstudio"]
+    headers = {"X-ArchCoach-Token": app.state.csrf_token}
+    assert client.patch("/api/settings", headers=headers, json={"ai_provider": "prism", "prism_model": "ternary-bonsai-2-27b"}).status_code == 200
+    assert isinstance(app.state.worker.engine._job_engine().codex, PrismAdapter)
+    assert app.state.worker.engine._job_engine().codex.settings.ai_provider == "prism"
+    assert client.get("/api/settings").json()["lmstudio_model"] == "qwen/qwen3.8-27b"
+    restarted = create_app(app.state.settings, start_worker=False)
+    assert restarted.state.settings.prism_model == "ternary-bonsai-2-27b"
+    assert restarted.state.settings.ai_provider == "prism"
 def test_conversation_endpoint_keeps_saved_review_boundary(tmp_path: Path):
     from archcoach.review import ReviewEngine
     from tests.test_review import OfflineCodex

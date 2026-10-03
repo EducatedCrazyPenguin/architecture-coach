@@ -9,5 +9,6 @@ build/
 .coverage
 .test-data/
 .acceptance-data/
+**/prism/server.key
 test-results/
 playwright-report/

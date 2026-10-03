@@ -122,3 +122,28 @@ def test_lmstudio_missing_model_explains_how_to_continue(tmp_path, monkeypatch):
     with pytest.raises(LMStudioUnavailable, match="Load qwen/qwen3.8-27b"):
         adapter.run_structured("source", schema, tmp_path)
     assert adapter.status()["ready"] is False
+
+
+def test_model_discovery_excludes_embeddings_and_is_not_execution_verification(tmp_path, monkeypatch):
+    adapter = LMStudioAdapter(replace(Settings.load(tmp_path / "data"), lmstudio_model="ternary-bonsai-2-27b"))
+    def connection(timeout):
+        return Connection(io.BytesIO(json.dumps({"models": [
+            {"type": "llm", "key": "ternary-bonsai-2-27b"},
+            {"type": "llm", "key": "qwen/qwen3.8-27b"},
+            {"type": "embedding", "key": "embedding-model"},
+        ]}).encode()))
+    monkeypatch.setattr(adapter, "_connection", connection)
+    assert adapter.models() == ["qwen/qwen3.8-27b", "ternary-bonsai-2-27b"]
+    assert "discovery does not verify model loading" in adapter.status()["message"]
+
+
+def test_bonsai_load_failure_retains_error_and_explains_runtime(tmp_path, monkeypatch):
+    adapter = LMStudioAdapter(Settings.load(tmp_path / "data"))
+    listing = Connection(io.BytesIO(json.dumps({"models": [{"key": "ternary-bonsai-2-27b", "max_context_length": 262144, "loaded_instances": []}]}).encode()))
+    loading = Connection(io.BytesIO(b'{"error":{"type":"model_load_failed"}}'))
+    loading.status = 500
+    connections = iter([listing, loading])
+    monkeypatch.setattr(adapter, "_connection", lambda timeout: next(connections))
+    with pytest.raises(LMStudioUnavailable, match="model_load_failed.*Prism"):
+        adapter._ensure_model_context("ternary-bonsai-2-27b", 60)
+    assert loading.closed

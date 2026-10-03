@@ -46,6 +46,8 @@ def review_configuration_fingerprint(project: dict, settings: Settings) -> str:
         "source_packet_chars": settings.source_packet_chars,
         "source_packet_limit": settings.source_packet_limit,
     }
+    if settings.ai_provider == "prism":
+        relevant["prism_model"] = settings.prism_model or "ternary-bonsai-2-27b"
     return hashlib.sha256(json.dumps(relevant, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -455,11 +457,11 @@ class ReviewEngine:
         """Freeze effective configuration when work starts, including both AI passes."""
         engine = copy.copy(self)
         from .ollama import OllamaAdapter
-        from .lmstudio import LMStudioAdapter
+        from .local_openai import LocalOpenAIAdapter
         if isinstance(self.codex, OllamaAdapter):
             engine.codex = OllamaAdapter(engine.settings)
-        if isinstance(self.codex, LMStudioAdapter):
-            engine.codex = LMStudioAdapter(engine.settings)
+        if isinstance(self.codex, LocalOpenAIAdapter):
+            engine.codex = type(self.codex)(engine.settings)
         if isinstance(self.codex, CodexAdapter):
             engine.codex = copy.copy(self.codex)
             engine.codex.settings = engine.settings

@@ -48,6 +48,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     app.state.settings = settings; app.state.store = store; app.state.worker = worker; app.state.shutdown_event = threading.Event(); app.state.csrf_token = secrets.token_urlsafe(24)
     diagnostics_lock = threading.Lock()
     diagnostics_cache: dict = {"at": 0.0, "value": None}
+    local_diagnostics_cache: dict = {"at": 0.0, "value": None}
 
     def codex_status(refresh: bool = False) -> dict:
         with diagnostics_lock:
@@ -55,6 +56,16 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                 diagnostics_cache["value"] = codex.status()
                 diagnostics_cache["at"] = time.monotonic()
             return diagnostics_cache["value"]
+
+    def local_status(selected: dict, refresh: bool = False) -> dict:
+        with diagnostics_lock:
+            if refresh or local_diagnostics_cache["value"] is None or time.monotonic() - local_diagnostics_cache["at"] > 30:
+                local_diagnostics_cache["value"] = {
+                    provider: selected if settings.ai_provider == provider else create_adapter(replace(settings, ai_provider=provider)).status()
+                    for provider in ("ollama", "lmstudio", "prism")
+                }
+                local_diagnostics_cache["at"] = time.monotonic()
+            return local_diagnostics_cache["value"]
 
     allowed_hosts = {
         f"127.0.0.1:{settings.port}", f"localhost:{settings.port}", f"[::1]:{settings.port}",
@@ -105,10 +116,11 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     @app.get("/settings", response_class=HTMLResponse)
     def settings_page(request: Request, saved: bool = False, refresh: bool = False):
+        selected = codex_status(refresh)
         return templates.TemplateResponse(
             request=request,
             name="settings.html",
-            context=context(request, page="settings", codex=codex_status(refresh), saved=saved, data_dir=settings.data_dir, app_settings=settings),
+            context=context(request, page="settings", codex=selected, local_providers=local_status(selected, refresh), saved=saved, data_dir=settings.data_dir, app_settings=settings),
         )
 
     @app.get("/projects/{project_id}", response_class=HTMLResponse)
@@ -500,6 +512,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         codex = create_adapter(settings)
         engine.codex = codex
         diagnostics_cache.update({"at": 0.0, "value": None})
+        local_diagnostics_cache.update({"at": 0.0, "value": None})
         return {key: getattr(settings, key) for key in allowed_setting_keys}
 
     @app.patch("/api/settings")
@@ -516,6 +529,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         codex_model: str = Form(default=""),
         ollama_model: str = Form(default=""),
         lmstudio_model: str = Form(default=""),
+        prism_model: str = Form(default=""),
         reasoning_effort: str = Form(default="low"),
         codex_call_timeout: int = Form(default=300),
         review_timeout: int = Form(default=900),
@@ -528,6 +542,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                 ai_provider=ai_provider, codex_command=codex_command,
                 codex_model=codex_model or None, ollama_model=ollama_model or None,
                 lmstudio_model=lmstudio_model or None,
+                prism_model=prism_model or None,
                 reasoning_effort=reasoning_effort, codex_call_timeout=codex_call_timeout,
                 review_timeout=review_timeout, source_packet_chars=source_packet_chars,
                 source_packet_limit=source_packet_limit,

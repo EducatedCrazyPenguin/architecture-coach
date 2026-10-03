@@ -31,6 +31,7 @@ async function waitForJob(page: Page): Promise<void> {
 
 async function configureFakeCodex(page: Page): Promise<void> {
   await page.goto("/settings");
+  await page.getByLabel("AI provider", {exact:true}).selectOption("codex");
   await page.getByLabel("Codex executable").fill(resolve("tests/fixtures/fake_codex.py"));
   await page.getByLabel("Reasoning effort").selectOption("high");
   await page.getByRole("button", { name: "Save analysis settings" }).click();
@@ -56,7 +57,7 @@ test.afterAll(async () => {
     const response = await fetch("http://127.0.0.1:8878/");
     const html = await response.text();
     const token = html.match(/name="archcoach-token" content="([^"]+)"/)?.[1];
-    if (token) await fetch("http://127.0.0.1:8878/exit", { method: "POST", headers: { "X-ArchCoach-Token": token } });
+    if (token) await fetch("http://127.0.0.1:8878/exit", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({_csrf:token}) });
   } catch {}
   if (server && server.exitCode === null) {
     await Promise.race([
@@ -189,4 +190,25 @@ test("malformed AI output leaves an explicit limited review", async ({ page }) =
   await waitForJob(page);
   await expect(page.getByText(/limited/).first()).toBeVisible();
   await expect(page.getByText(/Architecture analysis used the deterministic fallback/)).toBeVisible();
+});
+
+test("Bonsai selection persists and preserves existing local model choices", async ({page}) => {
+  await page.goto("/settings");
+  const originalQwen = await page.getByLabel("LM Studio model").inputValue();
+  const originalOllama = await page.getByLabel("Ollama model").inputValue();
+  await page.getByLabel("AI provider", {exact:true}).selectOption("prism");
+  await page.getByLabel("Prism model").fill("ternary-bonsai-2-27b");
+  await page.getByRole("button", {name:"Save analysis settings"}).click();
+  await expect(page.getByText("Project settings saved", {exact:false})).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("AI provider", {exact:true})).toHaveValue("prism");
+  await expect(page.getByLabel("Prism model")).toHaveValue("ternary-bonsai-2-27b");
+  await expect(page.getByLabel("LM Studio model")).toHaveValue(originalQwen);
+  await expect(page.getByLabel("Ollama model")).toHaveValue(originalOllama);
+  await expect(page.getByText("Install Bonsai Local.cmd", {exact:true})).toBeVisible();
+  await page.screenshot({path:"test-results/bonsai-settings.png"});
+  await page.setViewportSize({width:390,height:844});
+  await expect(page.getByLabel("AI provider", {exact:true})).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await configureFakeCodex(page);
 });

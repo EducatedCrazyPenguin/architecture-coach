@@ -61,6 +61,9 @@ def create_adapter(settings: Settings):
     if settings.ai_provider == "lmstudio":
         from .lmstudio import LMStudioAdapter
         return LMStudioAdapter(settings)
+    if settings.ai_provider == "prism":
+        from .prism import PrismAdapter
+        return PrismAdapter(settings)
     return CodexAdapter(settings)
 
 
