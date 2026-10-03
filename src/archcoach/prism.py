@@ -27,8 +27,12 @@ class PrismAdapter(LocalOpenAIAdapter):
     def _headers(self) -> dict[str, str]:
         headers = super()._headers()
         key_file = self.settings.data_dir / "prism" / "server.key"
-        if key_file.is_file():
-            headers["Authorization"] = "Bearer " + key_file.read_text(encoding="utf-8").strip()
+        if not key_file.is_file():
+            raise PrismUnavailable(f"Private Prism runtime key is missing. {self.start_hint}")
+        key = key_file.read_text(encoding="utf-8").strip()
+        if not key:
+            raise PrismUnavailable(f"Private Prism runtime key is empty. {self.start_hint}")
+        headers["Authorization"] = "Bearer " + key
         return headers
 
     def models(self) -> list[str]:
@@ -90,7 +94,7 @@ class PrismAdapter(LocalOpenAIAdapter):
     def _request_body(self, prompt: str, schema_data: dict) -> dict:
         body = super()._request_body(prompt, schema_data)
         body.update({
-            "response_format": {"type": "json_schema", "schema": schema_data},
+            "stream_options": {"include_usage": True},
             "chat_template_kwargs": {"enable_thinking": False},
             "reasoning_effort": "none", "max_tokens": 16384,
             "temperature": 0.7, "top_p": 0.8, "top_k": 20,

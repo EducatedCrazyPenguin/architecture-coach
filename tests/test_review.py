@@ -103,3 +103,29 @@ def test_chat_saves_snapshot_citations_and_marks_broken_evidence(tmp_path: Path)
     assert assistant["content"] == "The entry point is in app.py:1."
     assert assistant["citations"][0]["valid"] is True
     assert assistant["citations"][1]["valid"] is False
+
+
+@pytest.mark.parametrize("inferred,quality", [(True, "complete"), (False, "limited")])
+def test_runtime_claims_keep_truth_validation_and_diagram_failure_is_independent(tmp_path, monkeypatch, inferred, quality):
+    from tests.test_history import CompleteCodex, setup_engine
+
+    source, store, project, engine = setup_engine(tmp_path)
+    (source / "app.py").write_text("def helper():\n    return 1\nhelper()\n", encoding="utf-8")
+
+    class RuntimeCodex(CompleteCodex):
+        def run_structured(self, prompt, schema, *args, **kwargs):
+            result = super().run_structured(prompt, schema, *args, **kwargs)
+            if schema.name == "architecture.json":
+                result["relationships"] = [{
+                    "source": "application", "target": "application", "kind": "calls",
+                    "label": "calls helper", "inferred": inferred,
+                    "sources": [{"path": "app.py", "line": 3, "label": "Call", "valid": True}],
+                }]
+            return result
+
+    engine.codex = RuntimeCodex()
+    monkeypatch.setattr("archcoach.review.render_diagram", lambda *a, **kw: {"renderer": "unavailable"})
+    review = store.get_review(engine.run(project["id"]))
+    assert review["quality"] == quality
+    assert review["architecture"]["relationships"][0]["inferred"] is True
+    assert bool(review["artifacts"]["ai_warnings"]) is not inferred

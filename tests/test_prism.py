@@ -12,6 +12,9 @@ from tests.test_lmstudio import Connection
 
 def local_fixture(tmp_path, monkeypatch, content='{"answer":"Bonsai","citations":[]}', done=True):
     settings = replace(Settings.load(tmp_path / "data"), ai_provider="prism", codex_command="missing-codex")
+    key_file = settings.data_dir / "prism" / "server.key"
+    key_file.parent.mkdir(parents=True, exist_ok=True)
+    key_file.write_text("synthetic-runtime-key", encoding="utf-8")
     adapter = create_adapter(settings)
     assert isinstance(adapter, PrismAdapter)
     monkeypatch.setattr(adapter, "models", lambda: ["ternary-bonsai-2-27b"])
@@ -32,7 +35,9 @@ def test_bonsai_uses_only_selected_model_and_supported_structured_parameters(tmp
     body = json.loads(connection.requests[0][1]["body"])
     assert body["model"] == "ternary-bonsai-2-27b"
     assert body["chat_template_kwargs"] == {"enable_thinking": False}
-    assert body["response_format"]["schema"] == json.loads(schema.read_text())
+    assert body["response_format"]["json_schema"]["schema"] == json.loads(schema.read_text())
+    assert body["response_format"]["json_schema"]["strict"] is True
+    assert body["stream_options"]["include_usage"] is True
     assert body["max_tokens"] >= 16384
     assert "tools" not in body
     assert "/no_think" not in body["messages"][1]["content"]
@@ -59,6 +64,9 @@ def test_prism_missing_server_or_model_has_no_fallback(tmp_path, monkeypatch):
 
 def test_prism_context_and_cancellation_are_checked(tmp_path, monkeypatch):
     adapter = PrismAdapter(replace(Settings.load(tmp_path / "data"), ai_provider="prism"))
+    key_file = adapter.settings.data_dir / "prism" / "server.key"
+    key_file.parent.mkdir(parents=True, exist_ok=True)
+    key_file.write_text("synthetic-runtime-key", encoding="utf-8")
     connection = Connection(io.BytesIO(json.dumps({"default_generation_settings": {"n_ctx": 4096}}).encode()))
     monkeypatch.setattr(adapter, "_connection", lambda timeout: connection)
     with pytest.raises(PrismUnavailable, match="32768"):
@@ -70,10 +78,19 @@ def test_prism_context_and_cancellation_are_checked(tmp_path, monkeypatch):
     assert not connection.requests
 
 
+def test_missing_private_key_never_sends_an_unauthenticated_request(tmp_path, monkeypatch):
+    adapter = PrismAdapter(replace(Settings.load(tmp_path / "data"), ai_provider="prism"))
+    connection = Connection(io.BytesIO(b'{}'))
+    monkeypatch.setattr(adapter, "_connection", lambda timeout: connection)
+    assert adapter.status()["ready"] is False
+    assert not connection.requests
+    assert connection.closed
+
+
 def test_private_runtime_key_is_sent_only_to_fixed_loopback_connection(tmp_path, monkeypatch):
     adapter, connection, schema = local_fixture(tmp_path, monkeypatch)
     key_file = adapter.settings.data_dir / "prism" / "server.key"
-    key_file.parent.mkdir(parents=True)
+    key_file.parent.mkdir(parents=True, exist_ok=True)
     key_file.write_text("synthetic-runtime-key", encoding="utf-8")
     adapter.run_structured("saved source", schema, tmp_path)
     assert connection.requests[0][1]["headers"]["Authorization"] == "Bearer synthetic-runtime-key"
@@ -104,6 +121,9 @@ def test_bonsai_operations_share_the_selected_transport_and_saved_source(tmp_pat
     file.write_text(original)
     settings = replace(Settings.load(tmp_path / "data"), ai_provider="prism", codex_command="missing-codex")
     settings.ensure_dirs()
+    key_file = settings.data_dir / "prism" / "server.key"
+    key_file.parent.mkdir(parents=True, exist_ok=True)
+    key_file.write_text("synthetic-runtime-key", encoding="utf-8")
     store = Store(settings.db_path)
     project = store.add_project(ProjectCreate(path=str(source)))
     monkeypatch.setattr(PrismAdapter, "models", lambda self: ["ternary-bonsai-2-27b"])
@@ -117,7 +137,7 @@ def test_bonsai_operations_share_the_selected_transport_and_saved_source(tmp_pat
             body = json.loads(kwargs["body"])
             assert body["model"] == "ternary-bonsai-2-27b"
             prompt = body["messages"][1]["content"]
-            properties = body["response_format"]["schema"]["properties"]
+            properties = body["response_format"]["json_schema"]["schema"]["properties"]
             if "components" in properties:
                 schema = settings.schema_dir / "architecture.json"
                 result = fixture.run_structured(prompt, schema)
