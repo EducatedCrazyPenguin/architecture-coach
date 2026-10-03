@@ -37,6 +37,7 @@ def test_bonsai_uses_only_selected_model_and_supported_structured_parameters(tmp
     assert body["chat_template_kwargs"] == {"enable_thinking": False}
     assert body["response_format"]["json_schema"]["schema"] == json.loads(schema.read_text())
     assert body["response_format"]["json_schema"]["strict"] is True
+    assert json.dumps(json.loads(schema.read_text()), separators=(",", ":")) in body["messages"][0]["content"]
     assert body["stream_options"]["include_usage"] is True
     assert body["max_tokens"] >= 16384
     assert "tools" not in body

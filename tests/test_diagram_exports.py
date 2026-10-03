@@ -52,6 +52,21 @@ def test_renderer_timeout_repairs_layout_then_preserves_fallback(tmp_path: Path,
     assert attempts[0]["layout"] != attempts[1]["layout"]
 
 
+def test_real_pinned_renderer_fits_parallel_relationship_labels_without_changing_facts(tmp_path):
+    model = architecture()
+    model.components = model.components[:2]
+    model.relationships = [
+        Relationship(source="web", target="service", kind="imports", label="imports billing functions"),
+        Relationship(source="web", target="service", kind="calls", label="calls read_orders and total", inferred=True),
+    ]
+    original = model.model_dump()
+    settings = Settings(data_dir=tmp_path / "data", app_dir=Path(__file__).parents[1] / "src" / "archcoach")
+    result = render_diagram(settings, model, "Parallel dependency fixture", tmp_path / "out")
+    assert result["renderer"] == "archify", result["error"]
+    assert result["attempts"] == 2
+    assert model.model_dump() == original
+
+
 def test_renderer_shares_one_time_budget_between_repair_attempts(tmp_path: Path, monkeypatch):
     import archcoach.diagram as diagram
 

@@ -15,6 +15,7 @@ import zipfile
 from dataclasses import replace
 from pathlib import Path
 
+from .ai import schema_repair_prompt
 from .capture import CaptureError, fingerprint_project, read_blob
 from .config import Settings
 from .db import Store
@@ -201,7 +202,7 @@ class PlanService:
                     raise ReviewCancelled("Plan generation cancelled") from exc
                 validation = {"valid": False, "error": str(exc)}
             if attempt == 0:
-                prompt += f"\nYour plan failed validation: {json.dumps(validation)[:1800]}. Return one corrected JSON response."
+                prompt = schema_repair_prompt(prompt, raw, json.dumps(validation)[:1800])
         if cancelled and cancelled():
             raise ReviewCancelled("Plan generation cancelled")
         draft_data = draft.model_dump() if draft is not None else {"raw_output": raw}

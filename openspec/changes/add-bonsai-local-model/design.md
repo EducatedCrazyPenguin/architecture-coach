@@ -20,6 +20,9 @@ Non-goals: automatic code implementation, model downloads, cloud fallback, insta
 - Default to the smaller author-supported Vulkan Windows build, with optional CUDA and CPU builds. This avoids a large CUDA/DLL download while retaining GPU acceleration on this machine.
 - Provide a separate foreground Bonsai launcher with clean Ctrl+C shutdown; the app connects to this runtime and cancels individual requests without terminating the independently launched server. Do not claim Exit app stops an external model service.
 - Use documented non-thinking structured output for bounded coach tasks, with the author's non-thinking sampling parameters. No tool definitions or execution are supplied.
+- Supply the application-owned response schema in the local model's system prompt as well as the constrained-output field: llama.cpp's grammar does not expose the schema to the model. One shared repair prompt includes at most 24000 characters of rejected output, marked untrusted, within the existing single-repair and time budgets.
+- Confirm generic dependency relationships from resolved static edges independently of label wording. Runtime semantics still remain inferred; unsupported confirmation and broken citations retain limited-report handling.
+- Size the second diagram attempt's horizontal spacing from relationship-label lengths, preserving complete labels and all architecture facts.
 
 ## Risks / Trade-offs
 

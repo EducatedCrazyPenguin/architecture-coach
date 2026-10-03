@@ -13,5 +13,5 @@
 
 ## 3. Acceptance and publication
 
-- [ ] 3.1 Run a real disposable-project review, ten-question quiz, cited instructor chat and validated improvement plan using Bonsai, verifying source remains unchanged.
+- [x] 3.1 Run a real disposable-project review, ten-question quiz, cited instructor chat and validated improvement plan using Bonsai, verifying source remains unchanged.
 - [ ] 3.2 Run full pytest, browser and strict specification checks, review the diff and publish tested work with sanitised verification evidence.

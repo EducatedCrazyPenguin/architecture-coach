@@ -86,7 +86,8 @@ def _repair_layout(ir: dict) -> dict:
     """Second-attempt repair changes geometry only; architecture facts stay intact."""
     repaired = json.loads(json.dumps(ir))
     count = len(repaired.get("components", []))
-    repaired["layout"].update({"cols": min(2, max(1, count)), "cellW": 370, "cellH": 175, "gapX": 42, "gapY": 42})
+    label_space = max((len(item.get("label", "")) * 8 + 20 for item in repaired.get("connections", [])), default=42)
+    repaired["layout"].update({"cols": min(2, max(1, count)), "cellW": 370, "cellH": 175, "gapX": max(42, label_space), "gapY": 42})
     for component in repaired.get("components", []):
         index = next(i for i, item in enumerate(repaired["components"]) if item["id"] == component["id"])
         component["row"], component["col"] = divmod(index, repaired["layout"]["cols"])

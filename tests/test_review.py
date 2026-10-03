@@ -129,3 +129,30 @@ def test_runtime_claims_keep_truth_validation_and_diagram_failure_is_independent
     assert review["quality"] == quality
     assert review["architecture"]["relationships"][0]["inferred"] is True
     assert bool(review["artifacts"]["ai_warnings"]) is not inferred
+
+
+@pytest.mark.parametrize("label,has_import", [("imports", True), ("depends on helper", True), ("depends on helper", False)])
+def test_generic_dependency_confirmation_uses_static_edges_not_wording(tmp_path, monkeypatch, label, has_import):
+    from tests.test_history import CompleteCodex, setup_engine
+
+    source, store, project, engine = setup_engine(tmp_path)
+    (source / "app.py").write_text("import helper\n" if has_import else "value = 1\n", encoding="utf-8")
+    (source / "helper.py").write_text("value = 2\n", encoding="utf-8")
+
+    class DependencyCodex(CompleteCodex):
+        def run_structured(self, prompt, schema, *args, **kwargs):
+            result = super().run_structured(prompt, schema, *args, **kwargs)
+            if schema.name == "architecture.json":
+                helper = dict(result["components"][0], id="helper", source_paths=["helper.py"],
+                              sources=[{"path": "helper.py", "line": 1, "label": "Helper"}])
+                result["components"].append(helper)
+                result["relationships"] = [{"source": "application", "target": "helper", "kind": "dependency",
+                                            "label": label, "inferred": False, "sources": [{"path": "app.py", "line": 1}]}]
+            return result
+
+    engine.codex = DependencyCodex()
+    monkeypatch.setattr("archcoach.review.render_diagram", lambda *a, **kw: {"renderer": "unavailable"})
+    review = store.get_review(engine.run(project["id"]))
+    assert review["quality"] == ("complete" if has_import else "limited")
+    assert review["architecture"]["relationships"][0]["inferred"] is not has_import
+    assert bool(review["artifacts"]["ai_warnings"]) is not has_import

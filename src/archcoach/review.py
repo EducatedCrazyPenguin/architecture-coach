@@ -10,7 +10,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
 
-from .ai import ARCHITECTURE_PROMPT, CRITIQUE_PROMPT, CHAT_PROMPT, SOURCE_SUMMARY_PROMPT, CodexAdapter, CodexError, CodexMalformedOutput, CodexTimeoutError, create_adapter
+from .ai import ARCHITECTURE_PROMPT, CRITIQUE_PROMPT, CHAT_PROMPT, SOURCE_SUMMARY_PROMPT, CodexAdapter, CodexError, CodexMalformedOutput, CodexTimeoutError, create_adapter, schema_repair_prompt
 from .analyze import analyze_snapshot, compact_analysis, manifest_changes
 from .capture import CaptureCancelled, capture_project, read_blob
 from .config import Settings
@@ -590,6 +590,7 @@ class ReviewEngine:
                 if remaining <= 0:
                     raise CodexError("Review exceeded its total time budget")
                 self.codex.last_usage = {}
+                raw = None
                 try:
                     raw = self.codex.run_structured(
                         prompt, self.settings.schema_dir / schema_name, root,
@@ -600,7 +601,7 @@ class ReviewEngine:
                 except (ValueError, CodexMalformedOutput) as exc:
                     if attempt >= repairs:
                         raise
-                    prompt += f"\n\nYour prior response failed validation: {exc}. Return one corrected response matching the schema."
+                    prompt = schema_repair_prompt(prompt, raw, exc)
                 finally:
                     for key, value in getattr(self.codex, "last_usage", {}).items():
                         if isinstance(value, int):
@@ -665,9 +666,7 @@ class ReviewEngine:
                     if edge["source"] in membership[relation.source]
                     and edge["target"] in membership[relation.target]
                 ]
-                supported = (relation.kind == "imports" or (relation.kind == "dependency" and relation.label.lower() in {"import", "imports"})) and bool(
-                    supporting_edges
-                )
+                supported = relation.kind in {"imports", "dependency"} and bool(supporting_edges)
                 if not relation.inferred:
                     if not supported:
                         relation.inferred = True
@@ -835,22 +834,24 @@ class ReviewEngine:
             try:
                 response = None
                 for attempt in range(2):
+                    raw = None
                     try:
                         remaining = int(deadline - time.monotonic())
                         if remaining <= 0:
                             from .ai import CodexTimeoutError
                             raise CodexTimeoutError("Instructor exceeded the total time budget")
                         self.codex.last_usage = {}
-                        response = ChatResponse.model_validate(self.codex.run_structured(
+                        raw = self.codex.run_structured(
                             prompt, self.settings.schema_dir / "chat.json", root,
                             timeout=min(self.settings.codex_call_timeout, remaining), cancelled=is_cancelled,
                             on_event=on_event,
-                        ))
+                        )
+                        response = ChatResponse.model_validate(raw)
                         break
                     except (ValueError, CodexMalformedOutput) as exc:
                         if attempt:
                             raise
-                        prompt += f"\nYour response failed validation: {exc}. Return one corrected schema response."
+                        prompt = schema_repair_prompt(prompt, raw, exc)
                     finally:
                         for key, value in getattr(self.codex, "last_usage", {}).items():
                             usage_total[key] = usage_total.get(key, 0) + value
