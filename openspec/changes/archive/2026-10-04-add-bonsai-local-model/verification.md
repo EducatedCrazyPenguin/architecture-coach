@@ -27,4 +27,7 @@
 
 ## Publication
 
-Code checkpoints `dda837f` and `c6360aa` passed GitHub Windows CI. Final source checkpoint, CI and publication evidence will be recorded before archiving. All six implementation/acceptance tasks are verified; publication is the one remaining task.
+- Tested application commit: `50a801843739d34f26ad91ce9f3b916c0bd83365`. Windows CI passed: https://github.com/EducatedCrazyPenguin/architecture-coach/actions/runs/37162018139.
+- Fast-forward publication to `main` completed without rewriting history; local `main`, remote `main` and the tested application commit agreed before this documentation-only archive.
+- Final diff and tracked-file review found no private acceptance artifacts, model weights, runtime keys or personal absolute paths in the feature's public changes.
+- All seven tasks are verified, with zero remaining tasks and zero blockers. The archive and main capability specification record completion; application source remains identical to the tested commit.
