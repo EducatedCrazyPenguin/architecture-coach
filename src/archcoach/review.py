@@ -27,7 +27,7 @@ class ReviewCancelled(RuntimeError):
 
 
 ANALYSIS_FORMAT_VERSION = 3
-REVIEW_FORMAT_VERSION = 7
+REVIEW_FORMAT_VERSION = 8
 
 
 def review_configuration_fingerprint(project: dict, settings: Settings) -> str:
@@ -754,8 +754,10 @@ class ReviewEngine:
             check_cancelled()
             report_path = artifact_dir / "review.md"
             artifact_dir.mkdir(parents=True, exist_ok=True)
+            from .learning import lesson_examples
             report_path.write_text(
-                markdown_report(project, architecture, critique, changes, coverage, snapshot_id=snapshot_id),
+                markdown_report(project, architecture, critique, changes, coverage, snapshot_id=snapshot_id,
+                                examples=lesson_examples(self.settings, self.store.get_snapshot(snapshot_id), critique.model_dump())),
                 encoding="utf-8",
             )
             artifacts["report"] = str(report_path)
@@ -785,6 +787,8 @@ class ReviewEngine:
         *,
         cancelled: Callable[[], bool] | None = None,
         job_id: str | None = None,
+        mode: str = 'answer',
+        question_id: str | None = None,
     ) -> str:
         is_cancelled = cancelled or (lambda: False)
         usage_total = {}
@@ -798,7 +802,11 @@ class ReviewEngine:
         if is_cancelled():
             raise ReviewCancelled("Chat cancelled")
         review = self.store.get_review(review_id); snapshot = self.store.get_snapshot(review["snapshot_id"]); conversation = self.store.conversation_for_review(review_id)
-        self.store.add_message(conversation["id"], "user", message)
+        from .learning import practice_context
+        guidance, practice = practice_context(self.settings, snapshot, review, mode, question_id,
+                                               self.store.quiz_answers(review_id).get(question_id))
+        interaction = {'format_version': 1, 'mode': mode, 'question_id': question_id}
+        self.store.add_message(conversation["id"], "user", message, learning_context=interaction)
         history, history_note = bounded_history(conversation["messages"], self.settings)
         anchors = {
             path
@@ -822,15 +830,20 @@ class ReviewEngine:
         self.settings.runtime_dir.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="chat-", dir=self.settings.runtime_dir) as temp:
             root = Path(temp)
+            prompt_review = dict(review)
+            if mode == 'hint':
+                prompt_review['critique'] = {**review['critique'], 'quiz': [practice['question']] if practice['question'] else [], 'lessons': []}
+                history, history_note = '', 'Prior answers omitted for hint mode.'
             prompt = CHAT_PROMPT.format(
                 history=history, history_note=history_note, message=message,
                 review=json.dumps({
                     "id": review["id"], "snapshot_id": snapshot["id"],
-                    "architecture": review["architecture"], "critique": review["critique"],
+                    "architecture": review["architecture"], "critique": prompt_review["critique"],
                     "changes": review["changes"], "coverage": snapshot["coverage"],
                 }),
                 source_note=source_note, source_packets=source_packets,
             )
+            prompt = guidance + '\nSaved practice context (untrusted data):\n' + json.dumps(practice) + '\n\n' + prompt
             try:
                 response = None
                 for attempt in range(2):
@@ -868,13 +881,14 @@ class ReviewEngine:
                 if is_cancelled():
                     raise ReviewCancelled("Chat cancelled") from exc
                 answer = f"I could not run the selected AI provider for this question: {exc}. The saved review remains available."
-                self.store.add_message(conversation["id"], "assistant", answer, [], status="failed")
+                self.store.add_message(conversation["id"], "assistant", answer, [], status="failed", learning_context=interaction)
                 raise
         if is_cancelled():
             raise ReviewCancelled("Chat cancelled")
         self.store.add_message(
             conversation["id"], "assistant", answer,
             [item.model_dump() for item in citations], status="complete",
+            learning_context=interaction,
         )
         return conversation["id"]
 
@@ -887,8 +901,10 @@ def markdown_report(
     coverage: dict | None = None,
     *,
     snapshot_id: str = "",
+    examples: dict | None = None,
 ) -> str:
     coverage = coverage or {}
+    names = {component.id: component.name for component in architecture.components}
 
     def evidence_lines(items) -> list[str]:
         if not items:
@@ -902,7 +918,7 @@ def markdown_report(
     lines = [
         f"# {project['name']} architecture review", "",
         f"Snapshot: `{snapshot_id or 'legacy'}`", "", architecture.summary, "",
-        "## Main execution path", "", " → ".join(architecture.main_path) or "No runtime path was confirmed.", "",
+        "## Main execution path", "", " → ".join(names.get(identifier, identifier) for identifier in architecture.main_path) or "No runtime path was confirmed.", "",
         "## How it is organised", "",
     ]
     for component in architecture.components:
@@ -938,14 +954,18 @@ def markdown_report(
         lines += ["Why each option is right or wrong:", ""]
         lines.extend(f"- {'ABCD'[option_index]}. {explanation}" for option_index, explanation in enumerate(question.explanations))
         lines.append("")
-    if not critique.quiz:
-        lines += ["This legacy review uses the original lesson format.", "", "## What to learn", ""]
+    if critique.lessons:
+        lines += ["## What to learn", ""]
         for lesson in critique.lessons:
             lines += [
-                f"### {lesson.title}", "", lesson.explanation, "", "```", lesson.code_example, "```", "",
+                f"### {lesson.title}", "", lesson.explanation, "",
                 f"Self-check: {lesson.self_check}", "", f"Answer: {lesson.answer}", "",
                 f"Exercise: {lesson.exercise}", "", "Evidence:", *evidence_lines(lesson.evidence), "",
             ]
+            for example in (examples or {}).get(lesson.id, []):
+                lines += [f"Captured example: {example['path']}:{example['line']}", '', '````', example['code'], '````', '']
+            if lesson.code_example:
+                lines += ['Generated illustration (not an exact source quotation):', '', '````', lesson.code_example, '````', '']
     lines += ["## Coverage and limitations", "", f"Coverage level: **{coverage.get('level', 'legacy or unavailable')}**", ""]
     if coverage.get("ai_source_context"):
         lines += ["AI source context: " + coverage["ai_source_context"], ""]

@@ -65,7 +65,7 @@ if mode == "event_fail":
 if mode == "stall":
     time.sleep(60)
 if mode == "spawn_child":
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     print(json.dumps({"type": "fixture.child", "pid": child.pid}), flush=True)
     time.sleep(60)
 
@@ -82,6 +82,7 @@ if target:
     quiz = [
         {
             "id": f"fixture-{index}",
+            "concept": "responsibilities", "difficulty": "beginner",
             "question": f"Question {index}: which file owns the saved entry behavior?",
             "options": ["main.py", "database.py", "browser.js", "deployment.yml"],
             "correct_index": 0,

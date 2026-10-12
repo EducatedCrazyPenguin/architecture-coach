@@ -109,6 +109,8 @@ class QuizQuestion(BaseModel):
     correct_index: int = Field(ge=0, le=3)
     explanations: list[str] = Field(min_length=4, max_length=4)
     evidence: list[Evidence] = Field(min_length=1, max_length=3)
+    concept: Literal['unclassified', 'responsibilities', 'dependencies', 'data_flow', 'state', 'validation', 'testing', 'change_impact', 'tradeoffs'] = 'unclassified'
+    difficulty: Literal['unclassified', 'beginner', 'intermediate'] = 'unclassified'
 
     @model_validator(mode="after")
     def option_explanations_align(self):
@@ -238,7 +240,10 @@ class AppSettingsUpdate(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     message: str = Field(min_length=1, max_length=8000)
+    mode: Literal['answer', 'hint', 'simpler', 'deeper', 'explain_back', 'design'] = 'answer'
+    question_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ChatResponse(BaseModel):
@@ -290,3 +295,14 @@ class LessonStatusRequest(BaseModel):
 
 class QuizAnswerRequest(BaseModel):
     selected_index: int = Field(ge=0, le=3)
+    request_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{8,80}$')
+    mode: Literal['quiz', 'revision'] = 'quiz'
+
+
+class LearningNoteRequest(BaseModel):
+    content: str = Field(max_length=2000)
+
+
+class PlanLearningRequest(BaseModel):
+    review_id: str = Field(min_length=1, max_length=100)
+    note: str = Field(min_length=1, max_length=4000)
