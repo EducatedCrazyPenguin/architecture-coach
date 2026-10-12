@@ -5,6 +5,7 @@
   <div><p class="eyebrow">Project</p><h1>{{ project.name }}</h1><p class="lede">{{ project.description or project.path }}</p></div>
   <form method="post" action="/projects/{{ project.id }}/review"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><button class="primary" type="submit">Review current files</button></form>
 </header>
+{% if reviews %}<p><a class="primary button-link" href="/reviews/{{ reviews[0].id }}#overview">Start learning this repo</a></p>{% endif %}
 <div class="path-strip"><span>Local folder</span><code>{{ project.path }}</code></div>
 {% if project.goal %}<section class="panel"><p class="eyebrow">Current goal</p><p>{{ project.goal }}</p></section>{% endif %}
 <section class="section-head"><div><p class="eyebrow">Timeline</p><h2>Review history</h2></div>{% if reviews|length >= 2 %}<a class="secondary button-link" href="/projects/{{ project.id }}/compare">Compare reviews</a>{% endif %}</section>

@@ -3,7 +3,7 @@
 {% block content %}
 <header class="page-head">
   <div><p class="eyebrow">Your software, explained</p><h1>Architecture Coach</h1><p class="lede">Understand how each project fits together, see what changed, and learn one useful idea at a time.</p></div>
-  <span class="pill {{ 'ok' if codex.authenticated else 'warn' }}">Codex {{ 'ready' if codex.authenticated else 'needs attention' }}</span>
+  <span class="pill {{ 'ok' if codex.authenticated else 'warn' }}">{{ provider_name }} {{ 'ready' if codex.authenticated else 'needs attention' }}</span>
 </header>
 
 {% if request.query_params.get('error') %}<div class="notice error">{{ request.query_params.get('error') }}</div>{% endif %}

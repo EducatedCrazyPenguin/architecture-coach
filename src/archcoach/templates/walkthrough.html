@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Follow a feature · {{ project.name }}{% endblock %}
+{% block content %}
+<header class="page-head"><div><a href="/reviews/{{ review.id }}">← Saved review · {{ review.created_at[:10] }}</a><h1>Follow a feature through its code</h1><p>{{ walkthrough.qualification }}</p></div></header>
+{% for note in walkthrough.notes %}<p class="notice warn">{{ note }}</p>{% endfor %}
+{% if walkthrough.outlines %}
+<label>Feature boundary<select id="feature-select">{% for outline in walkthrough.outlines %}<option value="{{ loop.index0 }}">{{ outline.name }}</option>{% endfor %}</select></label>
+<p>Shows up to 24 Python files, four functions per file and twelve outlines. Other languages retain the ordinary dependency map.</p>
+<div class="walkthrough-controls"><button class="secondary" id="step-back" type="button">Previous step</button><span id="step-count" aria-live="polite"></span><button class="secondary" id="step-next" type="button">Next step</button></div>
+<section class="panel" id="feature-step" aria-live="polite"><h2 id="step-title"></h2><p id="step-explanation"></p><p id="step-evidence"></p><pre><code id="step-code"></code></pre></section>
+<details class="panel"><summary>Captured assertions · not run</summary><div id="feature-tests"></div></details>
+<iframe id="walkthrough-map" class="diagram-frame" sandbox="allow-scripts" title="Saved feature map" src="/reviews/{{ review.id }}/walkthrough-map"></iframe>
+<div class="component-grid">{% for component in review.architecture.components %}<article class="component walkthrough-component" data-component="{{ component.id }}"><h3>{{ component.name }}</h3><p>{{ component.responsibility }}</p><p>Dependencies: {% for relation in review.architecture.relationships if relation.source == component.id %}{{ component_names.get(relation.target, relation.target) }} ({{ relation.kind }}, {{ 'inferred' if relation.inferred else 'confirmed import/dependency' }}); {% else %}none recorded{% endfor %}</p><p>Callers/dependents: {% for relation in review.architecture.relationships if relation.target == component.id %}{{ component_names.get(relation.source, relation.source) }}; {% else %}none recorded{% endfor %}</p></article>{% endfor %}</div>
+<p><a href="/artifacts/{{ review.id }}/diagram" target="_blank" rel="noopener">Open saved architecture diagram</a> · <a href="/reviews/{{ review.id }}#chat">Ask the instructor about this path</a></p>
+<script id="walkthrough-data" type="application/json">{{ walkthrough|tojson }}</script>
+{% endif %}
+{% endblock %}
