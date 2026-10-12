@@ -15,7 +15,7 @@ Planning checkpoint: **12 October 2026**, application checkout `30a8d1e`.
 
 Run `pnpm spec:progress` for checked/total/remaining/blocker counts. Task counts are not estimates of effort. Source features are not a verified desktop release.
 
-**Evidence: 2/3 — current source and archived verification support the starting point; the proposed teaching experience and its benefit to the learner have not been tested.** Source observations below are directly supported (3/3). Past test results are recorded evidence, not checks rerun on this date.
+**Evidence: 2/3 — current implementation and synthetic/headless checks support the learning features; learner comprehension and real-provider teaching quality remain unverified.** Source observations in the original planning section below were directly supported (3/3) at base `30a8d1e`. Its historical baseline test results are recorded evidence; fresh gates are in the linked verification checkpoint.
 
 ## Outcome
 
@@ -169,6 +169,6 @@ Do not add more providers, hosted accounts, GitHub sync, a generic course platfo
 
 Preserve OpenMAIC as an independent app; this plan changes Architecture Coach only. Read arbitrary external repos from a folder the user has chosen; automatic remote downloading is a separate consent/scope decision.
 
-**Next concrete action:** complete the explicitly pending gates in `verify-repository-learning-journey/verification.md`: fresh Windows CI for the tested checkpoint, real-provider teaching quality, a requested learner usability session, then daily-use lifecycle acceptance. Full local pytest (183 passed), all six headless browser scenarios and strict specs have passed; installed-source metadata was inspected quietly. Do not infer understanding from quiz correctness or merge a fully verified release claim before those checks.
+**Next concrete action:** complete the explicitly pending gates in `verify-repository-learning-journey/verification.md`: real-provider teaching quality and a requested learner usability session (L17). Full local pytest (184 passed), all six headless browser scenarios, strict specs and Windows CI have passed; the quiet installed launcher start/reuse/exit and metadata checks complete L18. Visible normal launch remains explicitly pending unless requested. Do not infer understanding from quiz correctness or merge a fully verified release claim before those checks.
 
 **Not checked during planning:** current installed version/shortcut, fresh automated runtime results, live-provider readiness, or the learner's actual comprehension. No app, browser, model or target repository was launched or modified for this plan.
