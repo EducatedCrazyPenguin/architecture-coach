@@ -128,6 +128,7 @@ def source_walkthroughs(settings, snapshot, review):
                     return
                 visited.add(key)
                 args = [arg.arg for arg in [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]]
+                args.extend(arg.arg for arg in (fn.args.vararg, fn.args.kwarg) if arg is not None)
                 add(fn, fn_path, f'Boundary: {fn.name}', f'Declared parameters: {", ".join(args) or "none"}. Types and actual caller values are unconfirmed.', depth > 0, from_component)
                 nodes = sorted(body_nodes(fn), key=lambda n: (getattr(n, 'lineno', 0), isinstance(n, ast.Return), getattr(n, 'col_offset', 0)))
                 shadowed = set(args) | {n.id for n in nodes if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}

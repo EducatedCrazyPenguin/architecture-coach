@@ -227,6 +227,23 @@ def test_walkthrough_follows_unique_local_calls_and_marks_dynamic_unknown(saved_
     assert any('unresolved' in s['explanation'] for s in steps)
 
 
+def test_walkthrough_includes_variadic_parameters_and_does_not_resolve_shadowed_calls(saved_learning):
+    from archcoach.learning import source_walkthroughs
+    app, _, _, _, review_id = saved_learning
+    review = app.state.store.get_review(review_id)
+    snapshot = app.state.store.get_snapshot(review['snapshot_id'])
+    content = 'def greet(name):\n    return name\ndef forward(*values, **greet):\n    return greet()\n'
+    digest = hashlib.sha256(content.encode()).hexdigest()
+    blob = app.state.settings.blob_dir / digest[:2] / digest
+    blob.parent.mkdir(exist_ok=True); blob.write_text(content)
+    snapshot['manifest'] = [{'path': 'main.py', 'sha256': digest, 'lines': 4}]
+    outline = next(item for item in source_walkthroughs(app.state.settings, snapshot, review)['outlines']
+                   if item['name'] == 'main.py · forward')
+    assert 'values, greet' in outline['steps'][0]['explanation']
+    assert any('Target unresolved' in step['explanation'] for step in outline['steps'])
+    assert all(step['title'] != 'Boundary: greet' for step in outline['steps'])
+
+
 def changed_review(app, project, earlier, *, project_id=None):
     import copy
     old = app.state.store.get_review(earlier); snapshot = app.state.store.get_snapshot(old['snapshot_id'])
