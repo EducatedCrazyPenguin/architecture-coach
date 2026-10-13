@@ -34,7 +34,7 @@ class Component(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]*$")
     name: str
-    kind: Literal["frontend", "backend", "database", "cloud", "security", "messagebus", "external"] = "backend"
+    kind: Literal["frontend", "backend", "database", "cloud", "security", "messagebus", "external", "unknown"] = "unknown"
     responsibility: str
     sources: list[Evidence] = Field(default_factory=list, min_length=1, max_length=3)
     source_paths: list[str] = Field(default_factory=list, max_length=250)
@@ -239,11 +239,32 @@ class AppSettingsUpdate(BaseModel):
         return self
 
 
+class LearningSelection(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    kind: Literal['component', 'relationship', 'source', 'walkthrough', 'lesson', 'quiz', 'change']
+    id: str | None = Field(default=None, max_length=250)
+    path: str | None = Field(default=None, max_length=1000)
+    line: int | None = Field(default=None, ge=1)
+    end_line: int | None = Field(default=None, ge=1)
+    step: int | None = Field(default=None, ge=0, le=29)
+
+    @model_validator(mode='after')
+    def subject_is_complete(self):
+        if self.kind == 'source':
+            if self.path is None or self.line is None:
+                raise ValueError('Saved source selection requires a path and line')
+            Evidence(path=self.path, line=self.line, end_line=self.end_line)
+        elif not self.id:
+            raise ValueError('Saved selection requires an identifier')
+        return self
+
+
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     message: str = Field(min_length=1, max_length=8000)
     mode: Literal['answer', 'hint', 'simpler', 'deeper', 'explain_back', 'design'] = 'answer'
     question_id: str | None = Field(default=None, min_length=1, max_length=100)
+    selection: LearningSelection | None = None
 
 
 class ChatResponse(BaseModel):
@@ -294,9 +315,37 @@ class LessonStatusRequest(BaseModel):
 
 
 class QuizAnswerRequest(BaseModel):
-    selected_index: int = Field(ge=0, le=3)
+    selected_index: int | None = Field(default=None, ge=0, le=3)
+    outcome: Literal['answered', 'not_sure'] = 'answered'
     request_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{8,80}$')
     mode: Literal['quiz', 'revision'] = 'quiz'
+
+    @model_validator(mode='after')
+    def answer_matches_outcome(self):
+        if (self.outcome == 'answered') != (self.selected_index is not None):
+            raise ValueError('Choose an option, or use not_sure without an option')
+        return self
+
+
+class LearningSessionUpdate(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    view: Literal['overview', 'map', 'walkthrough', 'learn', 'quiz', 'changes'] | None = None
+    position: int | None = Field(default=None, ge=0, le=5)
+    outline_id: str | None = Field(default=None, max_length=250)
+    step: int | None = Field(default=None, ge=0, le=29)
+    quiz_index: int | None = Field(default=None, ge=0, le=9)
+    draft: str | None = Field(default=None, max_length=8000)
+    mode: Literal['answer','hint','simpler','deeper','explain_back','design'] | None = None
+    question_id: str | None = Field(default=None, max_length=100)
+    selection: LearningSelection | None = None
+    next_step: str | None = Field(default=None, max_length=2000)
+
+
+class LearningIssueRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    kind: Literal['quiz', 'answer']
+    target_id: str = Field(min_length=1, max_length=250)
+    note: str = Field(min_length=1, max_length=2000)
 
 
 class LearningNoteRequest(BaseModel):

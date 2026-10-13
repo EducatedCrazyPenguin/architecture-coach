@@ -79,6 +79,7 @@ class Worker:
                         job["review_id"], job["payload"]["message"], cancelled=cancelled,
                         job_id=job["id"],
                         mode=job['payload'].get('mode', 'answer'), question_id=job['payload'].get('question_id'),
+                        selection=job['payload'].get('selection'),
                     )
                     if cancelled():
                         raise ReviewCancelled("Chat cancelled")

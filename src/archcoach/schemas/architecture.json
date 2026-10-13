@@ -94,7 +94,8 @@
             "cloud",
             "security",
             "messagebus",
-            "external"
+            "external",
+            "unknown"
           ]
         },
         "responsibility": {

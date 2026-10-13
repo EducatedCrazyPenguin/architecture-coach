@@ -26,8 +26,8 @@ class ReviewCancelled(RuntimeError):
     pass
 
 
-ANALYSIS_FORMAT_VERSION = 3
-REVIEW_FORMAT_VERSION = 8
+ANALYSIS_FORMAT_VERSION = 4
+REVIEW_FORMAT_VERSION = 9
 
 
 def review_configuration_fingerprint(project: dict, settings: Settings) -> str:
@@ -132,7 +132,7 @@ def heuristic_architecture(project: dict, analysis: dict) -> Architecture:
         used.add(identifier)
         sample = files[0]
         kinds = {f["language"] for f in files}
-        kind = "frontend" if any(Path(f["path"]).suffix in {".tsx", ".jsx", ".html", ".css"} for f in files) else "database" if any("db" in f["path"].lower() or f["path"].endswith(".sql") for f in files) else "backend"
+        kind = 'unknown'
         definitions = [definition["name"] for file in files for definition in file.get("definitions", [])]
         local_imports = sum(
             imported.get("status") == "local"
@@ -146,12 +146,8 @@ def heuristic_architecture(project: dict, analysis: dict) -> Architecture:
         lowered = name.lower()
         if lowered == "tests":
             role = "Automated test boundary"
-        elif "train" in lowered:
-            role = "Training and model-preparation area (role inferred from its path)"
-        elif len(files) == 1 and Path(name).stem.lower() in {"app", "main", "server", "cli", "index"}:
-            role = "Application entry module (role inferred from its filename)"
         elif len(files) == 1:
-            role = f"{Path(name).stem.replace('_', ' ').title()} module (role inferred from its filename)"
+            role = "Source file; runtime role unconfirmed"
         else:
             role = "Source package boundary"
         named = f" Key definitions: {', '.join(definitions[:4])}." if definitions else ""
@@ -218,39 +214,42 @@ def _quiz_question(identifier: str, question: str, correct: str, distractors: li
 
 
 def heuristic_quiz(analysis: dict, architecture: Architecture) -> list[QuizQuestion]:
-    files = analysis.get("files", [])
-    largest = max(files, key=lambda item: (item.get("lines", 0), item["path"]))
-    sample_evidence = [Evidence(path=largest["path"], line=1, label="Saved source")]
-    paths = [item["path"] for item in files]
-    edges = analysis.get("edges", [])
-    first_edge = edges[0] if edges else None
-    unresolved_count = len(analysis.get("unresolved_imports", []))
-    cycle_count = len(analysis.get("cycles", []))
-    coverage = analysis.get("coverage", {}).get("level", "unavailable")
-    owning_component = next(
-        (component.name for component in architecture.components if largest["path"] in component.source_paths),
-        "Not assigned to a component in this limited view",
-    )
-    runtime_answer = " → ".join(architecture.main_path) if architecture.main_path else "Runtime order was not confirmed"
-    definition_file = next((item for item in files if item.get("definitions")), largest)
-    definition = (definition_file.get("definitions") or [{"name": None, "line": 1}])[0]
-    definition_evidence = [Evidence(path=definition_file["path"], line=definition.get("line", 1), label="Parsed definition")]
-    dependency_answer = f"{first_edge['source']} imports {first_edge['target']}" if first_edge else "No confirmed local dependency was found"
-    dependency_evidence = [Evidence(path=first_edge["source"], line=first_edge.get("line", 1), label="Confirmed import")] if first_edge else sample_evidence
-    test_component = next((component.name for component in architecture.components if component.name.lower() in {"test", "tests"}), "No separate test component")
-    size_guidance = "Inspect whether the largest module mixes responsibilities" if largest["lines"] > 500 else "Keep the module together unless responsibilities or callers diverge"
-    return [
-        _quiz_question("repo-definition", f"What does parsing establish about {definition_file['path']}?", (f"It declares {definition['name']} at line {definition.get('line', 1)}" if definition['name'] else "No named definition was recorded by this parser"), ["Its functions were executed during review", "Its runtime behavior was fully verified", "Its definition names were inferred from file size"], (f"The parser recorded {definition['name']} at line {definition.get('line', 1)}." if definition['name'] else "No definition was recorded. This does not prove the file has no behavior; inspect its saved statements and parser coverage."), definition_evidence, 1),
-        _quiz_question("repo-component", f"Which architecture component contains {largest['path']}?", owning_component, [component.name for component in architecture.components if component.name != owning_component][:3] + ["All components own every source file", "Only external services own local source", "Membership is determined by runtime execution order"], f"Saved membership for {largest['path']}: {owning_component}. Component membership is a review model, not execution order.", sample_evidence, 2),
-        _quiz_question("repo-dependency", "Which statement accurately describes the dependency analysis?", dependency_answer, ["The review executed modules to discover imports", "Dependencies were assigned solely by file size", "Diagram layout establishes runtime execution order"], f"The graph {'records this source-backed import; other edges may also exist' if first_edge else 'contains no confirmed local dependency edge; missing edges do not establish runtime independence'}.", dependency_evidence, 3),
-        _quiz_question("repo-dependency-meaning", "What does a confirmed arrow in this architecture map establish?", "Static source contains a resolved dependency", ["The target always runs after the source", "The dependency is safe and well designed", "The application was executed successfully"], "Confirmed arrows come from resolved static imports; they do not by themselves prove runtime order or design quality.", dependency_evidence, 0),
-        _quiz_question("repo-unresolved", "What should you conclude from the unresolved-import count?", f"{unresolved_count} imports need more resolution evidence", ["Every external package is broken", "The project cannot run", "Unresolved imports are confirmed runtime failures"], f"The review recorded {unresolved_count} unresolved imports. This is a coverage limitation, not proof of runtime failure.", sample_evidence, 1),
-        _quiz_question("repo-cycles", "What did deterministic dependency analysis find about cycles?", f"{cycle_count} mutually dependent group{'s' if cycle_count != 1 else ''} in the resolved graph", ["Every import creates a cycle", "Cycles were inferred from filenames", "Only runtime execution was checked"], f"Analysis found {cycle_count} strongly connected groups containing cycles. A group may contain more than one cycle; runtime impact needs separate evidence.", dependency_evidence, 2),
-        _quiz_question("repo-coverage", "Which interpretation of this review's coverage is accurate?", f"Coverage is {coverage}; runtime behavior may still be unconfirmed", ["All runtime paths were executed", "Deployment configuration was verified", "Every unresolved import is harmless"], f"The saved analysis labels coverage as {coverage} and keeps runtime claims separate from static evidence.", sample_evidence, 3),
-        _quiz_question("repo-tests", "What can this limited review establish about testing?", "Inspect captured test files and their assertions before claiming coverage", ["Test filenames prove every behavior is covered", "Importing production code proves every assertion passes", "A test component guarantees production reliability"], "Static imports and component names do not establish assertion quality or passing tests. Reviews do not execute target tests.", sample_evidence, 0),
-        _quiz_question("repo-next-step", f"What is the most defensible next step for {largest['path']} based on this review?", size_guidance, ["Split it solely because it is the largest file", "Rewrite it without checking callers", "Assume its runtime role from its filename"], f"The file has {largest['lines']} lines. Size is a prompt to inspect cohesion, not enough evidence by itself to force a split.", sample_evidence, 1),
-        _quiz_question("repo-runtime", "What does this review establish about the main runtime path?", runtime_answer, ["File size determines execution order", "Tests always run first", "Every import executes in diagram order"], f"The saved architecture {'records ' + runtime_answer if architecture.main_path else 'does not claim a runtime order without source evidence'}.", sample_evidence, 2),
-    ]
+    """Use declarations and dependencies; no quota-filling analyzer trivia."""
+    questions = []
+    files = sorted(analysis.get('files', []), key=lambda f: f['path'])
+    for item in files:
+        if len(questions) >= 3: break
+        definition = next((d for d in item.get('definitions', []) if d.get('name') and d.get('line')), None)
+        if not definition: continue
+        name, line = definition['name'], definition['line']
+        question = _quiz_question(f'declaration-{len(questions)}', f'Which named declaration can you inspect in {item["path"]}?', name,
+            [f'{name}_not_declared', 'Only declarations in an external library', 'No named declaration'],
+            f'{item["path"]}:{line} declares {name}. Its body explains what work it owns; its name alone does not prove its runtime purpose.',
+            [Evidence(path=item['path'], line=line)], len(questions))
+        question.concept, question.difficulty = 'responsibilities', 'beginner'
+        questions.append(question)
+    seen = set()
+    for edge in analysis.get('edges', []):
+        key = (edge['source'], edge['target'])
+        if key in seen: continue
+        seen.add(key)
+        if len(questions) >= 8: break
+        ref = [Evidence(path=edge['source'], line=edge.get('line', 1))]
+        question = _quiz_question(f'dependency-{len(questions)}', f'Which saved file does {edge["source"]} directly depend on through this import?', edge['target'],
+            [edge['source'], 'Every source file in the project', 'No local file'],
+            f'The cited import resolves to {edge["target"]}. This connects the modules; it does not establish execution order or what happens on failure.', ref, len(questions))
+        question.concept, question.difficulty = 'dependencies', 'beginner'
+        questions.append(question)
+    if seen and len(questions) < 10:
+        source, target = sorted(seen)[0]
+        edge = next(e for e in analysis['edges'] if e['source'] == source and e['target'] == target)
+        question = _quiz_question('change-dependent', f'If the interface of {target} changes, which saved caller is worth checking first?', source,
+            ['Only documentation regardless of imports', 'No callers need inspection', 'All callers already passed their tests'],
+            f'{source} imports {target}. Inspect its use of the changed interface; an import is evidence of a dependent, not proof that it breaks or that tests pass.',
+            [Evidence(path=source, line=edge.get('line', 1))], len(questions))
+        question.concept, question.difficulty = 'change_impact', 'beginner'
+        questions.append(question)
+    return questions
 
 
 def heuristic_critique(analysis: dict, architecture: Architecture | None = None) -> Critique:
@@ -262,15 +261,21 @@ def heuristic_critique(analysis: dict, architecture: Architecture | None = None)
         file = largest[0]
         evidence = [Evidence(path=file["path"], line=1, label="Large module")]
         findings.append(Finding(id="large-module", severity="medium", title="One module carries substantial weight", observation=f"{file['path']} has {file['lines']} lines.", why_it_matters="Large modules can make unrelated changes interfere with each other.", improvement="Identify one cohesive responsibility that can move behind a small interface.", tradeoffs="Splitting too early can scatter closely related logic.", evidence=evidence))
-        lessons.append(Lesson(id="cohesion", title="Cohesion and module boundaries", explanation="A cohesive module contains code that changes for the same reason.", code_example=f"# Start by listing the responsibilities in {file['path']}", self_check="Which functions in this module usually change together?", answer="Functions that serve the same responsibility are candidates to remain together.", exercise="Name the module's responsibilities before proposing any split.", evidence=evidence))
     if analysis["cycles"]:
         cycle = analysis["cycles"][0]
         matching_edge = next((edge for edge in analysis["edges"] if edge["source"] == cycle[0] and edge["target"] == cycle[1]), None)
         evidence = [Evidence(path=cycle[0], line=(matching_edge or {}).get("line", 1), label="Static dependency-cycle edge")]
         findings.append(Finding(id="dependency-cycle", severity="high", title="Modules form a dependency cycle", observation="Static import analysis found: " + " → ".join(cycle), why_it_matters="Cycles can make initialization, testing, and isolated change harder; runtime impact remains an inference until exercised.", improvement="Inspect the cited import edge and move a shared contract only if both modules truly need it.", tradeoffs="A new shared module is only useful when the shared responsibility is clear.", evidence=evidence))
+    if not lessons and analysis['edges']:
+        edge = analysis['edges'][0]
+        lessons.append(Lesson(id='boundaries', title='How these two files are connected', explanation=f"{edge['source']} imports {edge['target']}. A dependency means one part asks another part for something. This helps you find which callers to inspect before changing the imported interface; it does not say what runs first.", code_example='', self_check=f"If {edge['target']} changes its interface, which file should you inspect?", answer=f"Inspect {edge['source']}, which declares the import. Whether its behavior breaks needs a separate check.", exercise='Open the saved import and name what crosses this boundary.', evidence=[Evidence(path=edge['source'], line=edge.get('line', 1))]))
     if not lessons:
-        sample = analysis["files"][0] if analysis["files"] else {"path": "README.md"}
-        lessons.append(Lesson(id="boundaries", title="Architectural boundaries", explanation="A boundary groups code with one responsibility and controls what crosses into it.", code_example=f"# Inspect the imports entering {sample['path']}", self_check="What would callers need if this module were replaced?", answer="That minimum set of behavior is the module's practical interface.", exercise="Write one sentence describing what this module owns.", evidence=[Evidence(path=sample["path"], line=1)] if analysis["files"] else []))
+        for file in analysis['files']:
+            declaration = next((d for d in file.get('definitions', []) if d.get('kind') == 'function'), None)
+            if declaration:
+                parameters = ', '.join(declaration.get('parameters', [])) or 'no named parameters recorded'
+                lessons.append(Lesson(id='function-boundary', title='Inputs and work at a function boundary', explanation=f"{file['path']} declares {declaration['name']}, a named piece of work. Its recorded inputs are {parameters}. Read its body to see how those inputs are used and what is returned. This boundary helps callers ask for the work without copying its steps; the source alone does not establish actual caller values or successful execution.", code_example='', self_check=f"Where would you inspect the work done by {declaration['name']}?", answer=f"Read the saved declaration in {file['path']} and follow its body. Its name alone does not tell you the result.", exercise='Name one declared input and one operation from the saved body; say unknown if either is absent.', evidence=[Evidence(path=file['path'], line=declaration['line'], end_line=declaration.get('end_line', declaration['line']))]))
+                break
     if architecture is None:
         architecture = Architecture(
             summary="Static analysis", components=[Component(
@@ -329,8 +334,8 @@ def validate_critique_quality(critique: Critique) -> Critique:
     blocked_markers = ("review blocked", "cannot access", "could not access", "unable to access", "provide their contents")
     if any(any(marker in strength.lower() for marker in blocked_markers) for strength in critique.strengths):
         raise ValueError("Codex did not have enough source access to complete the critique")
-    if len(critique.quiz) != 10:
-        raise ValueError("The repository quiz must contain exactly 10 questions")
+    if len({q.question.strip().casefold() for q in critique.quiz}) != len(critique.quiz):
+        raise ValueError("Quiz questions must be distinct")
     position_reference = re.compile(r"\b(?:option|choice|answer)\s+[A-D]\b|\b(?:all|none)\s+of\s+the\s+above\b|\b(?:both|either)\s+[A-D]\s+(?:and|or)\s+[A-D]\b", re.IGNORECASE)
     if any(position_reference.search(text) for question in critique.quiz
            for text in [question.question, *question.options, *question.explanations]):
@@ -846,6 +851,7 @@ class ReviewEngine:
         job_id: str | None = None,
         mode: str = 'answer',
         question_id: str | None = None,
+        selection: dict | None = None,
     ) -> str:
         is_cancelled = cancelled or (lambda: False)
         usage_total = {}
@@ -862,7 +868,14 @@ class ReviewEngine:
         from .learning import practice_context
         guidance, practice = practice_context(self.settings, snapshot, review, mode, question_id,
                                                self.store.quiz_answers(review_id).get(question_id))
-        interaction = {'format_version': 1, 'mode': mode, 'question_id': question_id}
+        from .workspace import resolve_selection
+        from .learning import saved_excerpt, source_walkthroughs, check_teaching_claims
+        from .models import LearningSelection
+        selected = resolve_selection(snapshot, review, LearningSelection.model_validate(selection) if selection else None,
+                                     source_walkthroughs(self.settings, snapshot, review, selection['id'].rsplit(':',1)[0], is_cancelled) if selection and selection.get('kind') == 'walkthrough' else None)
+        practice['selected_context'] = selected
+        practice['selected_examples'] = [item for ref in selected['evidence'] if (item := saved_excerpt(self.settings, snapshot, ref))]
+        interaction = {'format_version': 2, 'mode': mode, 'question_id': question_id, 'selection': selected['selection']}
         self.store.add_message(conversation["id"], "user", message, learning_context=interaction)
         history, history_note = bounded_history(conversation["messages"], self.settings)
         anchors = {
@@ -883,6 +896,7 @@ class ReviewEngine:
         source_packets, source_note = build_source_packets(
             self.settings, snapshot["manifest"], snapshot["analysis"], anchors=anchors,
             changed_paths=requested_paths,
+            preferred_paths={ref['path'] for ref in selected['evidence']},
         )
         self.settings.runtime_dir.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="chat-", dir=self.settings.runtime_dir) as temp:
@@ -917,6 +931,9 @@ class ReviewEngine:
                             on_event=on_event,
                         )
                         response = ChatResponse.model_validate(raw)
+                        if any(not ref.valid for ref in validate_evidence_items(response.citations, snapshot['manifest'])):
+                            raise ValueError('Instructor cited a missing saved file or invalid line range')
+                        check_teaching_claims(self.settings,snapshot,response)
                         break
                     except (ValueError, CodexMalformedOutput) as exc:
                         if attempt:
@@ -1003,6 +1020,8 @@ def markdown_report(
     if not critique.findings:
         lines += ["No justified architecture concerns were found.", ""]
     lines += ["## Repository quiz", ""]
+    lines += [f'{len(critique.quiz)} saved questions. Fewer than ten reflects available evidence; no filler is added.', '']
+    if not critique.quiz: lines += ['No grounded questions were saved. Read the saved lessons and source; generate a new review deliberately when coverage improves.', '']
     for index, question in enumerate(critique.quiz, 1):
         lines += [f"### {index}. {question.question}", ""]
         lines.extend(f"- {'ABCD'[option_index]}. {option}" for option_index, option in enumerate(question.options))

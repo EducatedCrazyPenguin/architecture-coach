@@ -77,7 +77,7 @@ def test_per_call_timeout_preserves_a_limited_static_review(tmp_path: Path):
     assert any("deterministic fallback" in warning for warning in review["artifacts"]["ai_warnings"])
 
 
-def test_chat_saves_snapshot_citations_and_marks_broken_evidence(tmp_path: Path):
+def test_chat_rejects_broken_evidence_after_one_repair(tmp_path: Path):
     source = tmp_path / "source"; source.mkdir()
     (source / "app.py").write_text("def main():\n    return 'hello'\n", encoding="utf-8")
     settings = Settings(data_dir=tmp_path / "data", app_dir=Path(__file__).parents[1] / "src" / "archcoach"); settings.ensure_dirs()
@@ -96,13 +96,13 @@ def test_chat_saves_snapshot_citations_and_marks_broken_evidence(tmp_path: Path)
             }
 
     engine.codex = ChatCodex()
-    conversation_id = engine.chat(review_id, "Where does it start?")
-    conversation = store.conversation_for_review(review_id)
-    assert conversation["id"] == conversation_id
-    assistant = conversation["messages"][-1]
-    assert assistant["content"] == "The entry point is in app.py:1."
-    assert assistant["citations"][0]["valid"] is True
-    assert assistant["citations"][1]["valid"] is False
+    with pytest.raises(ValueError, match='invalid line range'):
+        engine.chat(review_id, "Where does it start?")
+    assistant = store.conversation_for_review(review_id)['messages'][-1]
+    assert assistant['status'] == 'failed'
+    assert not assistant['citations']
+    assert 'missing saved file' in assistant['content']
+
 
 
 @pytest.mark.parametrize("inferred,quality", [(True, "complete"), (False, "limited")])

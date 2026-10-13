@@ -6,7 +6,7 @@
     "strengths": {"type": "array", "items": {"type": "string"}},
     "findings": {"type": "array", "maxItems": 5, "items": {"$ref": "#/$defs/finding"}},
     "lessons": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/lesson"}},
-    "quiz": {"type": "array", "minItems": 10, "maxItems": 10, "items": {"$ref": "#/$defs/quiz_question"}},
+    "quiz": {"type": "array", "minItems": 0, "maxItems": 10, "items": {"$ref": "#/$defs/quiz_question"}},
     "requirements": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/requirement_assessment"}}
   },
   "$defs": {

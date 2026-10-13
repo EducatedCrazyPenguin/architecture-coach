@@ -24,8 +24,9 @@ def test_quiz_does_not_invent_definitions_or_mark_reciprocal_import_wrong():
         {"source": "b.py", "target": "a.py", "kind": "imports", "line": 1},
     ], "cycles": [["a.py", "b.py", "a.py"]]}
     quiz = heuristic_quiz(analysis, heuristic_architecture({"name": "Fixture"}, analysis))
-    assert len(quiz) == 10
-    assert "No named definition was recorded" in quiz[0].options[quiz[0].correct_index]
+    assert len(quiz) == 3
+    assert all(not q.id.startswith("declaration") for q in quiz)
+    assert {q.options[q.correct_index] for q in quiz[:2]} == {"a.py", "b.py"}
     assert all("None of these" not in option for question in quiz for option in question.options)
     assert "b.py imports a.py" not in quiz[2].options
     for question in quiz:

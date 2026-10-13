@@ -55,9 +55,12 @@ def build_source_packets(
     *,
     changed_paths: set[str] | None = None,
     anchors: set[str] | None = None,
+    preferred_paths: set[str] | None = None,
 ) -> tuple[str, str]:
     by_path = {item["path"]: item for item in manifest}
     ordered = _priority_paths(manifest, analysis, changed_paths or set(), anchors or set())
+    preferred = preferred_paths or set()
+    ordered.sort(key=lambda path: path not in preferred)
     limit = settings.source_packet_chars
     packets: list[str] = []
     current = ""
