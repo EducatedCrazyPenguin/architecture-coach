@@ -62,6 +62,13 @@ def test_unchanged_check_reuses_review_conversation_and_lesson_progress(tmp_path
     _, store, project, engine = setup_engine(tmp_path)
     review_id = engine.run(project["id"])
     assert store.get_review(review_id)["format_version"] == REVIEW_FORMAT_VERSION
+    saved_quiz = store.get_review(review_id)['critique']['quiz']
+    from collections import Counter
+    assert sorted(Counter(q['correct_index'] for q in saved_quiz).values()) == [2, 2, 3, 3]
+    question = saved_quiz[0]
+    wrong_index = (question['correct_index'] + 1) % 4
+    store.save_quiz_answer(review_id, question['id'], wrong_index, False, request_id='saved-attempt')
+    attempts = store.quiz_attempts(review_id, question['id'])
     conversation = store.conversation_for_review(review_id)
     store.add_message(conversation["id"], "user", "remember this")
     store.set_lesson_status(review_id, "boundary", "learning")
@@ -74,6 +81,8 @@ def test_unchanged_check_reuses_review_conversation_and_lesson_progress(tmp_path
     assert store.conversation_for_review(review_id)["messages"][0]["content"] == "remember this"
     assert store.lesson_statuses(review_id) == {"boundary": "learning"}
     assert store.list_history(project["id"])[0]["history_type"] == "check"
+    assert store.get_review(review_id)['critique']['quiz'] == saved_quiz
+    assert store.quiz_attempts(review_id, question['id']) == attempts
 
 
 def test_goal_change_regenerates_but_name_schedule_and_force_behave_explicitly(tmp_path: Path, monkeypatch):
@@ -104,6 +113,21 @@ def test_legacy_and_cross_project_comparisons_are_rejected():
         validate_comparison_records(valid, {**valid, "project_id": "other"})
     with pytest.raises(ValueError, match="completed"):
         validate_comparison_records(valid, {**valid, "status": "failed"})
+
+
+def test_review_teaching_qualifies_tests_storage_and_conventions(tmp_path, monkeypatch):
+    _, store, project, engine = setup_engine(tmp_path)
+    class TeachingProvider(CompleteCodex):
+        def run_structured(self, prompt, schema, *args, **kwargs):
+            if schema.name == 'critique.json':
+                assert 'captured tests are expectations, not execution results' in prompt
+                assert 'never say an unexecuted test proves' in prompt
+                assert 'in-memory list does not establish restart persistence' in prompt
+                assert 'recommended boundary is not enforced access control' in prompt
+            return super().run_structured(prompt, schema, *args, **kwargs)
+    engine.codex = TeachingProvider()
+    monkeypatch.setattr('archcoach.review.render_diagram', lambda *args, **kwargs: {'renderer': 'unavailable'})
+    assert store.get_review(engine.run(project['id']))['quality'] == 'complete'
 
 
 def test_invalid_ai_evidence_cannot_advance_successful_schedule(tmp_path: Path, monkeypatch):

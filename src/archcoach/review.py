@@ -38,6 +38,7 @@ def review_configuration_fingerprint(project: dict, settings: Settings) -> str:
         "analysis_format": ANALYSIS_FORMAT_VERSION,
         "review_format": REVIEW_FORMAT_VERSION,
         "critique_prompt": CRITIQUE_PROMPT,
+        "quiz_order_version": 1,
         "codex_command": settings.codex_command,
         "ai_provider": settings.ai_provider,
         "codex_model": settings.codex_model,
@@ -287,6 +288,17 @@ def validate_critique_quality(critique: Critique) -> Critique:
         raise ValueError("Codex did not have enough source access to complete the critique")
     if len(critique.quiz) != 10:
         raise ValueError("The repository quiz must contain exactly 10 questions")
+    position_reference = re.compile(r"\b(?:option|choice|answer)\s+[A-D]\b|\b(?:all|none)\s+of\s+the\s+above\b|\b(?:both|either)\s+[A-D]\s+(?:and|or)\s+[A-D]\b", re.IGNORECASE)
+    if any(position_reference.search(text) for question in critique.quiz
+           for text in [question.question, *question.options, *question.explanations]):
+        raise ValueError("Quiz text may depend on option position; use self-contained options and explanations")
+    # Balance fresh quizzes only; pair rotation keeps grading and explanations aligned.
+    for slot, question in enumerate(sorted(critique.quiz, key=lambda q: hashlib.sha256(q.id.encode()).digest())):
+        target = slot % 4
+        shift = (question.correct_index - target) % 4
+        question.options = question.options[shift:] + question.options[:shift]
+        question.explanations = question.explanations[shift:] + question.explanations[:shift]
+        question.correct_index = target
     return critique
 
 

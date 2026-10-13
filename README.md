@@ -44,6 +44,8 @@ Choose **Start learning this repo**, read the lessons beside the quiz and expand
 
 **My learning** keeps first attempts, retries, due recall questions and private notes across repositories. Revision uses saved questions with providers off. Wrong answers return after one day, initial correct answers after three days; delayed correct recall increases the interval up to fourteen days. Same-day retries do not increase recall streaks. A correct answer is practice, not a mastery certificate.
 
+New AI quizzes balance correct answer positions locally while keeping each explanation with its choice. Position-dependent wording such as **all of the above** is rejected through the bounded repair path. Existing saved options and attempts remain unchanged; balanced presentation does not prove an answer is factually correct.
+
 The instructor offers a small hint, simpler/deeper explanation, feedback on your explanation and constrained design practice through the selected provider. Offline reading hints and saved answers require no model. Explain-back uses correct points, missing reasoning and one next question; design practice allows multiple defensible alternatives. Unsent drafts survive failures and cancellation.
 
 In a comparison, **Learn from this change** pairs two saved excerpts and asks you to predict possible affected callers. **Compare a concept across saved repos** keeps each origin separate. **Follow this improvement through** records user reports against a later saved review; planning files or observed source edits never prove implementation or passing tests.
