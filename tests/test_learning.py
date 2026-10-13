@@ -42,6 +42,7 @@ def test_teaching_and_quiz_coexist_without_live_source(saved_learning):
     assert 'hello &lt;' in page
     assert 'Start learning this repo' in page
     assert '<span>Greeting entry</span>' in page
+    assert 'Illustrations may omit steps. Do not paste them over working code without checking the full saved source.' in page
 
 
 def test_export_uses_saved_data_and_does_not_replace_artifacts(saved_learning):
@@ -51,6 +52,7 @@ def test_export_uses_saved_data_and_does_not_replace_artifacts(saved_learning):
     assert result.status_code == 200
     assert 'A focused responsibility' in result.text and 'Who owns greeting text?' in result.text
     assert 'def greet(name)' in result.text
+    assert 'Illustrations may omit steps. Do not paste them over working code without checking the full saved source.' in result.text
     assert app.state.store.get_review(review)['artifacts'] == before['artifacts']
 
 

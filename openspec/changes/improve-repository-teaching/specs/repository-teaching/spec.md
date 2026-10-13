@@ -23,8 +23,12 @@ The application SHALL display readable component names and the selected provider
 - **THEN** the instructor draft selects simpler mode without submitting it or overwriting an unsent draft, teaching guidance explains one idea in plain language before code and lesson code stays available through a keyboard-accessible disclosure
 
 #### Scenario: Teaching instructions improve
-- **WHEN** the application changes its critique teaching prompt
+- **WHEN** the application changes its architecture, source-summary or critique teaching prompt
 - **THEN** new review checks regenerate teaching rather than reusing the old configuration, while existing reviews and their captured evidence remain unchanged
+
+#### Scenario: Generated example may omit existing work
+- **WHEN** a lesson displays a generated code illustration
+- **THEN** the screen and Markdown teaching export warn that it may omit steps and must be checked against the full saved source before replacing working code
 
 #### Scenario: Teaching distinguishes observations from guarantees
 - **WHEN** the application requests lessons, self-check answers and quiz explanations

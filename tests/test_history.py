@@ -115,6 +115,33 @@ def test_legacy_and_cross_project_comparisons_are_rejected():
         validate_comparison_records(valid, {**valid, "status": "failed"})
 
 
+@pytest.mark.parametrize('prompt_name', ['ARCHITECTURE_PROMPT', 'SOURCE_SUMMARY_PROMPT'])
+def test_review_prompt_change_regenerates_without_rewriting_saved_learning(tmp_path, monkeypatch, prompt_name):
+    import archcoach.review as review_module
+
+    _, store, project, engine = setup_engine(tmp_path)
+    monkeypatch.setattr(review_module, 'render_diagram', lambda *args, **kwargs: {'renderer': 'unavailable'})
+    before_id = engine.run(project['id'])
+    before = store.get_review(before_id)
+    question = before['critique']['quiz'][0]
+    store.save_quiz_answer(before_id, question['id'], question['correct_index'], True, request_id='before-guidance-change')
+    attempts = store.quiz_attempts(before_id, question['id'])
+    conversation = store.conversation_for_review(before_id)
+    store.add_message(conversation['id'], 'user', 'Keep this saved discussion')
+    store.set_lesson_status(before_id, 'boundary', 'learning')
+    assert engine.run(project['id']) == before_id
+
+    monkeypatch.setattr(review_module, prompt_name, getattr(review_module, prompt_name) + '\nDo not infer a CLI from a function name.')
+    after_id = engine.run(project['id'])
+
+    assert after_id != before_id
+    assert store.get_snapshot(store.get_review(after_id)['snapshot_id'])['fingerprint'] == store.get_snapshot(before['snapshot_id'])['fingerprint']
+    assert store.get_review(before_id) == before
+    assert store.quiz_attempts(before_id, question['id']) == attempts
+    assert store.lesson_statuses(before_id) == {'boundary': 'learning'}
+    assert store.conversation_for_review(before_id)['messages'][0]['content'] == 'Keep this saved discussion'
+
+
 def test_review_teaching_qualifies_tests_storage_and_conventions(tmp_path, monkeypatch):
     _, store, project, engine = setup_engine(tmp_path)
     class TeachingProvider(CompleteCodex):

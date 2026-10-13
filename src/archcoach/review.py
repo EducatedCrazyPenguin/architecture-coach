@@ -37,6 +37,8 @@ def review_configuration_fingerprint(project: dict, settings: Settings) -> str:
         "exclusions": sorted(project.get("exclusions", [])),
         "analysis_format": ANALYSIS_FORMAT_VERSION,
         "review_format": REVIEW_FORMAT_VERSION,
+        "architecture_prompt": ARCHITECTURE_PROMPT,
+        "source_summary_prompt": SOURCE_SUMMARY_PROMPT,
         "critique_prompt": CRITIQUE_PROMPT,
         "quiz_order_version": 1,
         "codex_command": settings.codex_command,
@@ -978,7 +980,9 @@ def markdown_report(
             for example in (examples or {}).get(lesson.id, []):
                 lines += [f"Captured example: {example['path']}:{example['line']}", '', '````', example['code'], '````', '']
             if lesson.code_example:
-                lines += ['Generated illustration (not an exact source quotation):', '', '````', lesson.code_example, '````', '']
+                lines += ['Generated illustration (not an exact source quotation):', '',
+                          'Illustrations may omit steps. Do not paste them over working code without checking the full saved source.', '',
+                          '````', lesson.code_example, '````', '']
     lines += ["## Coverage and limitations", "", f"Coverage level: **{coverage.get('level', 'legacy or unavailable')}**", ""]
     if coverage.get("ai_source_context"):
         lines += ["AI source context: " + coverage["ai_source_context"], ""]
