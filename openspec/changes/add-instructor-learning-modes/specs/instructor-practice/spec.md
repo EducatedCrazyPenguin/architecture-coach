@@ -17,3 +17,7 @@ The instructor SHALL use the selected snapshot and an explicit correctness/missi
 #### Scenario: Unknown question or provider failure
 - **WHEN** a request names a question outside the selected review or the provider fails
 - **THEN** the application rejects the unknown question or records failure without a successful answer or source switch
+
+#### Scenario: Mandatory design constraint
+- **WHEN** a learner requires data to survive a process restart
+- **THEN** instructor guidance requires concrete durable storage and recovery in every proposed valid alternative, rejects options that fail the constraint and treats captured tests as expectations rather than execution results

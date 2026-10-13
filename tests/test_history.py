@@ -76,7 +76,7 @@ def test_unchanged_check_reuses_review_conversation_and_lesson_progress(tmp_path
     assert store.list_history(project["id"])[0]["history_type"] == "check"
 
 
-def test_goal_change_regenerates_but_name_schedule_and_force_behave_explicitly(tmp_path: Path):
+def test_goal_change_regenerates_but_name_schedule_and_force_behave_explicitly(tmp_path: Path, monkeypatch):
     _, store, project, engine = setup_engine(tmp_path)
     first = engine.run(project["id"])
     store.update_project(project["id"], name="Renamed", interval_days=30)
@@ -87,6 +87,13 @@ def test_goal_change_regenerates_but_name_schedule_and_force_behave_explicitly(t
     assert second != first
     third = engine.run(project["id"], force=True)
     assert third != second
+    import archcoach.review as review_module
+    saved = store.get_review(third)
+    monkeypatch.setattr(review_module, 'CRITIQUE_PROMPT', review_module.CRITIQUE_PROMPT+'\nTeach one beginner idea.')
+    fourth = store.get_review(engine.run(project['id']))
+    assert fourth['id'] != third
+    assert store.get_snapshot(fourth['snapshot_id'])['fingerprint'] == store.get_snapshot(saved['snapshot_id'])['fingerprint']
+    assert store.get_review(third) == saved
 
 
 def test_legacy_and_cross_project_comparisons_are_rejected():

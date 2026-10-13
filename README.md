@@ -38,6 +38,8 @@ The app uses the saved Codex CLI login and runs review sessions read-only. On Wi
 
 ## Learn using a saved review
 
+Choose **Explain this simply** if you are new to reading code. It opens an instructor draft in simpler mode; it does not send a request or replace an unsent question. The guidance starts with the part's job and one input/output example in plain language, defines unfamiliar terms, and asks one short question. Lessons show their explanation before the optional **Show the saved code** disclosure. New reviews use the updated teaching guidance; old saved reviews stay unchanged.
+
 Choose **Start learning this repo**, read the lessons beside the quiz and expand **Read the captured example**. **Follow a feature** steps through supported local Python declarations with saved code and a synchronized component map. These are bounded static reading outlines, not observed runtime traces; unsupported languages, dynamic calls and unexecuted assertions remain labelled.
 
 **My learning** keeps first attempts, retries, due recall questions and private notes across repositories. Revision uses saved questions with providers off. Wrong answers return after one day, initial correct answers after three days; delayed correct recall increases the interval up to fourteen days. Same-day retries do not increase recall streaks. A correct answer is practice, not a mastery certificate.
@@ -46,7 +48,7 @@ The instructor offers a small hint, simpler/deeper explanation, feedback on your
 
 In a comparison, **Learn from this change** pairs two saved excerpts and asks you to predict possible affected callers. **Compare a concept across saved repos** keeps each origin separate. **Follow this improvement through** records user reports against a later saved review; planning files or observed source edits never prove implementation or passing tests.
 
-**Evidence: 2/3 — the learning update passed synthetic regressions and headless browser checks; real-provider teaching quality, learner comprehension and daily-use lifecycle acceptance remain pending.** Implementation checks and pending acceptance are tracked in [the learning roadmap](docs/FUTURE_UPDATES.md). Existing snapshots and artifacts stay unchanged; private learning records use transactional SQLite migrations with pre-migration recovery backups.
+**Evidence: 2/3 — synthetic, headless and quiet installed-launcher checks passed; an authorised real Bonsai sample exercised teaching but exposed accuracy limitations. Learner comprehension and reliable teaching acceptance remain pending.** Implementation checks and pending acceptance are tracked in [the learning roadmap](docs/FUTURE_UPDATES.md). Existing snapshots and artifacts stay unchanged; private learning records use transactional SQLite migrations with pre-migration recovery backups.
 
 ## Storage and privacy
 

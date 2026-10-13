@@ -18,6 +18,14 @@ The application SHALL display readable component names and the selected provider
 - **WHEN** the selected provider is local
 - **THEN** dashboard labeling identifies that provider rather than Codex
 
+#### Scenario: Beginner starts without reading syntax
+- **WHEN** a learner chooses a simple explanation from a saved review
+- **THEN** the instructor draft selects simpler mode without submitting it or overwriting an unsent draft, teaching guidance explains one idea in plain language before code and lesson code stays available through a keyboard-accessible disclosure
+
+#### Scenario: Teaching instructions improve
+- **WHEN** the application changes its critique teaching prompt
+- **THEN** new review checks regenerate teaching rather than reusing the old configuration, while existing reviews and their captured evidence remain unchanged
+
 ### Requirement: Meaningful questions
 New structured questions SHALL identify their concept and difficulty and explain source-grounded choices. Older questions SHALL remain readable without invented metadata.
 

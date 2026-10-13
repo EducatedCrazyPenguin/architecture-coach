@@ -133,8 +133,14 @@ document.addEventListener("DOMContentLoaded", () => {
     currentStatus.textContent = labels[result.status] || "Current-file status unavailable";
     currentStatus.className = `pill ${result.status === "matches" ? "ok" : "warn"}`;
   }).catch(() => { currentStatus.textContent = "Current-file status unavailable"; currentStatus.className = "pill warn"; });
-  document.querySelectorAll(".suggestions button[data-question]").forEach(button => button.addEventListener("click", () => {
-    const area = document.querySelector('.chat-form textarea'); if (area) { area.value = button.dataset.question; area.focus(); }
+  document.querySelectorAll("button[data-question]").forEach(button => button.addEventListener("click", () => {
+    if (!instructor) return;
+    openInstructor();
+    const area = instructor.querySelector('textarea');
+    if (area.value.trim()) {toast("Your draft is preserved. Send or clear it before starting another topic.");return;}
+    instructor.querySelector('[name="mode"]').value = button.dataset.mode || "answer";
+    instructor.querySelector('[name="question_id"]').value = "";
+    area.value = button.dataset.question;
   }));
   const chatForm = document.querySelector(".chat-form");
   if (chatForm) {

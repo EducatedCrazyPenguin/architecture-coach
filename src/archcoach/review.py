@@ -37,6 +37,7 @@ def review_configuration_fingerprint(project: dict, settings: Settings) -> str:
         "exclusions": sorted(project.get("exclusions", [])),
         "analysis_format": ANALYSIS_FORMAT_VERSION,
         "review_format": REVIEW_FORMAT_VERSION,
+        "critique_prompt": CRITIQUE_PROMPT,
         "codex_command": settings.codex_command,
         "ai_provider": settings.ai_provider,
         "codex_model": settings.codex_model,

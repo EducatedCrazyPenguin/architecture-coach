@@ -192,6 +192,24 @@ def test_explain_back_uses_source_rubric_and_persists_mode(saved_learning):
     assert messages[-1]['citations'][0]['valid']
 
 
+def test_beginner_explanation_uses_saved_source_and_one_question(saved_learning):
+    from archcoach.review import ReviewEngine
+    app, _, _, project, review = saved_learning
+    (Path(project['path']) / 'main.py').write_text('CURRENT FILE MUST NEVER ENTER THE PROMPT')
+    class FakeProvider:
+        last_usage = {}
+        def run_structured(self, prompt, *args, **kwargs):
+            assert 'new to Python' in prompt and 'plain language before code' in prompt
+            assert 'one short question' in prompt and 'define each term' in prompt
+            assert 'hello <' in prompt and 'CURRENT FILE MUST NEVER' not in prompt
+            return {'answer': 'This part takes a name and makes greeting text. What does it receive?',
+                    'citations': [{'path': 'main.py', 'line': 1, 'end_line': 2}]}
+    engine = ReviewEngine(app.state.settings, app.state.store); engine.codex = FakeProvider()
+    engine._run_chat(review, 'I am new to Python. Explain what this part does.', mode='simpler')
+    answer = app.state.store.conversation_for_review(review)['messages'][-1]
+    assert answer['learning_context']['mode'] == 'simpler' and answer['citations'][0]['valid']
+
+
 def test_design_mode_allows_alternatives_and_provider_failure(saved_learning):
     from archcoach.review import ReviewEngine
     from archcoach.ai import CodexUnavailable
@@ -201,10 +219,14 @@ def test_design_mode_allows_alternatives_and_provider_failure(saved_learning):
         def run_structured(self, prompt, *args, **kwargs):
             assert 'multiple defensible designs' in prompt
             assert 'hypothetical' in prompt and 'not executed' in prompt
+            assert 'all mandatory constraints' in prompt and 'concrete durable storage' in prompt
+            assert 'Names must survive process restart while preserving greeting format.' in prompt
+            assert 'not execution results' in prompt
+            assert 'Distinguish imports from calls' in prompt
             raise CodexUnavailable('synthetic provider off')
     engine = ReviewEngine(app.state.settings, app.state.store); engine.codex = Failure()
     with pytest.raises(CodexUnavailable):
-        engine._run_chat(review, 'Add input validation while preserving greeting format.', mode='design', question_id='ownership')
+        engine._run_chat(review, 'Names must survive process restart while preserving greeting format.', mode='design', question_id='ownership')
     assert app.state.store.conversation_for_review(review)['messages'][-1]['status'] == 'failed'
 
 
