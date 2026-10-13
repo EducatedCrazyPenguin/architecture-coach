@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+from functools import lru_cache
 import json
 import secrets
 import threading
@@ -24,12 +25,13 @@ from .diagram import render_selected_comparison
 from .models import AppSettingsUpdate, ChatRequest, ImprovementPlanDraft, LessonStatusRequest, PlanApproval, PlanRequest, ProjectCreate, ProjectUpdate, QuizAnswerRequest
 from .plans import PlanConflict, PlanError, PlanService, download_zip, plan_files
 from .capture import CaptureError, fingerprint_project
-from .review import ReviewEngine, compare_saved_reviews, source_text, validate_comparison_records
+from .review import ReviewEngine, compare_saved_reviews, source_text, validate_comparison_records, add_resolved_relationships
 from .worker import Worker
-from .learning import lesson_examples, source_walkthroughs, change_examples, concept_examples
+from .learning import lesson_examples, source_walkthroughs, change_examples, concept_examples, saved_glossary
 from .models import Architecture, Critique
-from .models import LearningNoteRequest, PlanLearningRequest, utc_now
+from .models import LearningNoteRequest, PlanLearningRequest, LearningSessionUpdate, LearningIssueRequest, utc_now
 from .review import markdown_report
+from .workspace import saved_graph, resolve_selection, component_role
 
 
 def create_app(settings: Settings | None = None, start_worker: bool = True) -> FastAPI:
@@ -97,6 +99,16 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         app.mount("/vendor", StaticFiles(directory=str(htmx_dir)), name="vendor")
 
     def context(request: Request, **extra):
+        if extra.get('page') == 'review' and extra.get('review'):
+            selected_review = extra['review']
+            extra.setdefault('conversation', store.conversation_for_review(selected_review['id']))
+            extra.setdefault('snapshot', store.get_snapshot(selected_review['snapshot_id']))
+            extra['learning_session'] = store.learning_session(selected_review['id'])
+            extra['learning_issues'] = store.learning_issues(selected_review['id'])
+            extra['flagged_questions'] = {i['target_id'] for i in extra['learning_issues'] if i['kind'] == 'quiz' and not i['resolved_at']}
+            extra['component_roles'] = {c['id']: component_role(c) for c in selected_review['architecture']['components']}
+            extra.setdefault('graph', saved_graph(extra['snapshot'], selected_review))
+            extra['provider_name'] = {'codex':'Codex', 'ollama':'Ollama · local', 'lmstudio':'LM Studio · local', 'prism':'Prism · Bonsai local'}[settings.ai_provider]
         projects = store.list_projects()
         for project in projects:
             project["latest_review"] = store.latest_review(project["id"])
@@ -131,6 +143,11 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if concept and concept not in concepts:
             raise HTTPException(422, 'Choose a concept shown in the library')
         latest = {p['id']: store.latest_review(p['id']) for p in store.list_projects()}
+        recommendations = []
+        for session in store.learning_sessions():
+            if (session['state'].get('position') or 0) < 5 or session['state'].get('draft'):
+                recommendations.append({'title':'Continue '+session['project_name'], 'reason':'Your saved session or instructor draft is unfinished.', 'href':f"/reviews/{session['review_id']}/session"})
+                break
         now = utc_now()
         for item in records:
             current = latest.get(item['project_id'])
@@ -138,11 +155,26 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             item['due'] = item['due_at'] <= now
         selected = [item for item in records if not concept or item['question'].get('concept', 'unclassified') == concept]
         due_count = sum(item['due'] for item in selected)
+        due = next((i for i in selected if i['due']), None)
+        if due:
+            recommendations.append({'title':'Due practice', 'reason':'This saved question is due for recall.', 'href':'/learning?practice=true'})
+        mistake = next((i for i in selected if i.get('first_correct') == 0), None)
+        if mistake:
+            recommendations.append({'title':'Review a mistake or uncertainty', 'reason':'Your first attempt was incorrect or uncertain; history is preserved.', 'href':f"/reviews/{mistake['review_id']}#quiz"})
+        for summary in latest.values():
+            if not summary: continue
+            review = store.get_review(summary['id'])
+            answered = store.quiz_answers(review['id'])
+            flagged = {i['target_id'] for i in store.learning_issues(review['id']) if i['kind']=='quiz' and not i['resolved_at']}
+            question = next((q for q in review['critique'].get('quiz', []) if q['id'] not in answered and q['id'] not in flagged and any(e.get('valid',True) for e in q['evidence'])), None)
+            if question:
+                recommendations.append({'title':'Explore '+question.get('concept','a concept').replace('_',' '), 'reason':'An unpractised question has saved repository evidence.', 'href':f"/reviews/{review['id']}#quiz"})
+                break
         if practice:
             selected = [item for item in selected if item['due']][:5]
         return templates.TemplateResponse(request=request, name='learning.html', context=context(
             request, page='learning', records=selected, concepts=concepts, concept=concept,
-            practice=practice, due_count=due_count))
+            practice=practice, due_count=due_count, recommendations=recommendations))
 
     @app.post('/reviews/{review_id}/quiz/{question_id}/note')
     def learning_note(review_id: str, question_id: str, request: Request, content: str = Form(max_length=2000), csrf: str = Form(alias='_csrf')):
@@ -198,39 +230,90 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                                  snapshot_id=snapshot['id'], examples=lesson_examples(settings, snapshot, review['critique']))
         return Response(report, media_type='text/markdown', headers={'Content-Disposition': 'attachment; filename="learning-report.md"'})
 
+    @app.get('/reviews/{review_id}/map', response_class=HTMLResponse)
+    def expanded_map(review_id: str, request: Request, component: str | None = None, q: str = '', role: str = 'runtime', focus: str | None = None):
+        try:
+            review = store.get_review(review_id)
+            project = store.get_project(review['project_id'])
+        except KeyError:
+            raise HTTPException(404, 'Review not found')
+        try:
+            graph = saved_graph(store.get_snapshot(review['snapshot_id']), review, component=component, query=q, role=role, focus=focus)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return templates.TemplateResponse(request=request, name='map.html', context=context(
+            request, page='review', review=review, project=project, graph=graph))
+
+    @app.get('/api/reviews/{review_id}/graph')
+    def graph_data(review_id: str, component: str | None = None, q: str = '', role: str = 'runtime', focus: str | None = None):
+        try:
+            review = store.get_review(review_id)
+            return saved_graph(store.get_snapshot(review['snapshot_id']), review, component=component, query=q, role=role, focus=focus)
+        except KeyError:
+            raise HTTPException(404, 'Review not found')
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
     @app.get('/reviews/{review_id}/walkthrough', response_class=HTMLResponse)
-    def walkthrough_page(review_id: str, request: Request):
+    def walkthrough_page(review_id: str, request: Request, file: str | None = None):
         try:
             review = store.get_review(review_id)
             project = store.get_project(review['project_id'])
             snapshot = store.get_snapshot(review['snapshot_id'])
         except KeyError:
             raise HTTPException(404)
+        prior_outline = store.learning_session(review_id).get('outline_id')
+        selected_file = (file or None) if file is not None else (prior_outline.rsplit(':', 1)[0] if prior_outline else None)
+        try: outline = saved_walkthrough(review, snapshot, selected_file)
+        except ValueError as exc: raise HTTPException(422, str(exc)) from exc
         return templates.TemplateResponse(request=request, name='walkthrough.html', context=context(
             request, page='review', review=review, project=project,
-            walkthrough=saved_walkthrough(review, snapshot),
+            walkthrough=outline, feature_files=[f['path'] for f in snapshot['manifest'] if f['path'].lower().endswith(('.py','.ts','.tsx','.js','.jsx','.mjs','.cjs'))],
             component_names={c['id']: c['name'] for c in review['architecture']['components']}))
 
     @app.get('/api/reviews/{review_id}/walkthrough')
-    def walkthrough_data(review_id: str):
+    def walkthrough_data(review_id: str, file: str | None = None):
         try:
             review = store.get_review(review_id)
-            return saved_walkthrough(review, store.get_snapshot(review['snapshot_id']))
+            return saved_walkthrough(review, store.get_snapshot(review['snapshot_id']), file)
         except KeyError:
             raise HTTPException(404)
+        except ValueError as exc: raise HTTPException(422, str(exc)) from exc
 
-    def saved_walkthrough(review, snapshot):
-        saved = store.get_learning_walkthrough(review['id'])
+    def saved_walkthrough(review, snapshot, selected_path=None):
+        if selected_path: return selected_walkthrough(review['id'], selected_path)
+        saved = store.get_learning_walkthrough(review['id'], 2)
         return saved if saved is not None else store.save_learning_walkthrough(review['id'], source_walkthroughs(settings, snapshot, review))
 
+    @lru_cache(maxsize=8)
+    def selected_walkthrough(review_id, selected_path):
+        review = store.get_review(review_id)
+        return source_walkthroughs(settings, store.get_snapshot(review['snapshot_id']), review, selected_path)
+
     @app.get('/reviews/{review_id}/walkthrough-map', response_class=HTMLResponse)
-    def walkthrough_map(review_id: str):
+    def walkthrough_map(review_id: str, role: str = 'all'):
         from .diagram import fallback_diagram
         try:
             review = store.get_review(review_id)
         except KeyError:
             raise HTTPException(404)
-        document = fallback_diagram(Architecture.model_validate(review['architecture']), 'Saved feature map', None)
+        if role not in {'all', 'runtime', 'tests', 'tooling', 'supporting', 'unknown'}:
+            raise HTTPException(422, 'Unknown source role')
+        snapshot = store.get_snapshot(review['snapshot_id'])
+        saved_model = Architecture.model_validate(review['architecture'])
+        manifest = {f['path']:f for f in snapshot['manifest']}
+        edges = [e for e in snapshot['analysis'].get('edges', []) if e.get('source') in manifest and isinstance(e.get('line'), int) and 1 <= e['line'] <= manifest[e['source']]['lines']]
+        add_resolved_relationships(saved_model, edges)
+        model = saved_model.model_dump()
+        roles = {c['id']: component_role(c) for c in model['components']}
+        if role != 'all':
+            model['components'] = [c for c in model['components'] if roles[c['id']] == role]
+            known = {c['id'] for c in model['components']}
+            model['relationships'] = [r for r in model['relationships'] if r['source'] in known and r['target'] in known]
+            model['main_path'] = [i for i in model.get('main_path', []) if i in known]
+        if not model['components']:
+            return HTMLResponse('<p>No components match this source role. Choose another role or inspect the saved files.</p>')
+        document = fallback_diagram(Architecture.model_validate(model), 'Saved feature map', None, review_id=review_id, role_labels=roles)
         return HTMLResponse(document, headers={'Content-Security-Policy': "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:"})
 
     def enqueue_plan(review_id: str, data: PlanRequest) -> str:
@@ -442,11 +525,11 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
 
     @app.post("/reviews/{review_id}/chat")
-    def chat(review_id: str, request: Request, message: str = Form(), csrf: str = Form(alias="_csrf"), mode: str = Form(default='answer'), question_id: str = Form(default='')):
+    def chat(review_id: str, request: Request, message: str = Form(), csrf: str = Form(alias="_csrf"), mode: str = Form(default='answer'), question_id: str = Form(default=''), selection: str = Form(default='')):
         require_local(request, csrf)
         try:
-            data = ChatRequest(message=message, mode=mode, question_id=question_id or None)
-        except ValidationError as exc:
+            data = ChatRequest(message=message, mode=mode, question_id=question_id or None, selection=json.loads(selection) if selection else None)
+        except (ValidationError, json.JSONDecodeError) as exc:
             raise HTTPException(422, str(exc)) from exc
         job_id = enqueue_chat(review_id, data)
         return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
@@ -491,28 +574,91 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             data = QuizAnswerRequest.model_validate(await request.json())
         except (ValidationError, json.JSONDecodeError) as exc:
             raise HTTPException(422, str(exc)) from exc
-        if data.selected_index >= len(question["options"]):
+        if any(i['kind'] == 'quiz' and i['target_id'] == question_id and not i['resolved_at'] for i in store.learning_issues(review_id)):
+            raise HTTPException(409, 'This question is paused for correction. Resolve its issue before practising it.')
+        if data.selected_index is not None and data.selected_index >= len(question["options"]):
             raise HTTPException(422, "Selected option is outside this question")
         correct_index = question["correct_index"]
         correct = data.selected_index == correct_index
         try:
-            saved = store.save_quiz_answer(review_id, question_id, data.selected_index, correct, request_id=data.request_id, mode=data.mode)
+            saved = store.save_quiz_answer(review_id, question_id, data.selected_index, correct, request_id=data.request_id, mode=data.mode, outcome=data.outcome)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
         return {
             **saved,
             "correct_index": correct_index,
             "correct_answer": question["options"][correct_index],
-            "explanation": question["explanations"][data.selected_index],
+            "explanation": ('You recorded uncertainty. Read the saved explanation, then try again when ready. ' + question['explanations'][correct_index]) if data.outcome == 'not_sure' else question["explanations"][data.selected_index],
         }
 
+    @app.get('/api/reviews/{review_id}/session')
+    def session_state(review_id: str):
+        try: store.get_review(review_id)
+        except KeyError: raise HTTPException(404, 'Review not found')
+        return store.learning_session(review_id)
+
+    @app.get('/reviews/{review_id}/session', response_class=HTMLResponse)
+    def guided_session(review_id: str, request: Request):
+        try:
+            review = store.get_review(review_id)
+            project = store.get_project(review['project_id'])
+        except KeyError: raise HTTPException(404, 'Review not found')
+        return templates.TemplateResponse(request=request, name='session.html', context=context(request, page='review', review=review, project=project))
+
+    @app.get('/reviews/{review_id}/glossary', response_class=HTMLResponse)
+    def glossary_page(review_id: str, request: Request):
+        try:
+            review = store.get_review(review_id); snapshot = store.get_snapshot(review['snapshot_id']); project = store.get_project(review['project_id'])
+        except KeyError: raise HTTPException(404, 'Review not found')
+        return templates.TemplateResponse(request=request, name='glossary.html', context=context(request, page='review', review=review, project=project, glossary=saved_glossary(settings,snapshot,review)))
+
+    @app.patch('/api/reviews/{review_id}/session')
+    def update_session(review_id: str, data: LearningSessionUpdate, request: Request):
+        require_local(request)
+        try: review = store.get_review(review_id)
+        except KeyError: raise HTTPException(404, 'Review not found')
+        snapshot = store.get_snapshot(review['snapshot_id'])
+        changes = data.model_dump(exclude_unset=True)
+        if data.question_id: saved_question(review_id,data.question_id)
+        try:
+            resolve_selection(snapshot, review, data.selection, saved_walkthrough(review, snapshot, data.selection.id.rsplit(':',1)[0]) if data.selection and data.selection.kind == 'walkthrough' else None)
+            state = {**store.learning_session(review_id), **changes}
+            if state.get('outline_id'):
+                outline = next((o for o in saved_walkthrough(review, snapshot, state['outline_id'].rsplit(':',1)[0])['outlines'] if o['id'] == state['outline_id']), None)
+                if not outline or not 0 <= (state.get('step') or 0) < len(outline['steps']):
+                    raise ValueError('Session step is outside this saved outline')
+            if state.get('quiz_index') is not None and not 0 <= state['quiz_index'] < len(review['critique'].get('quiz', [])):
+                raise ValueError('Session question is outside this saved quiz')
+        except ValueError as exc: raise HTTPException(422, str(exc)) from exc
+        return store.save_learning_session(review_id, changes)
+
+    @app.post('/api/reviews/{review_id}/issues', status_code=201)
+    def flag_issue(review_id: str, data: LearningIssueRequest, request: Request):
+        require_local(request)
+        try: store.get_review(review_id)
+        except KeyError: raise HTTPException(404, 'Review not found')
+        if data.kind == 'quiz': saved_question(review_id, data.target_id)
+        elif not any(m['id'] == data.target_id and m['role'] == 'assistant' for m in store.conversation_for_review(review_id)['messages']):
+            raise HTTPException(422, 'Answer not found in this saved conversation')
+        return {'id': store.flag_learning_issue(review_id, data.kind, data.target_id, data.note)}
+
+    @app.post('/api/reviews/{review_id}/issues/{issue_id}/resolve')
+    def resolve_issue(review_id: str, issue_id: str, request: Request):
+        require_local(request)
+        try: store.resolve_learning_issue(review_id, issue_id)
+        except KeyError: raise HTTPException(404, 'Open issue not found')
+        return {'resolved': True}
+
     @app.get("/reviews/{review_id}/source")
-    def evidence_source(review_id: str, path: str, line: int = 1):
+    def evidence_source(review_id: str, request: Request, path: str, line: int = 1, end_line: int | None = None):
         try:
             review = store.get_review(review_id); snapshot = store.get_snapshot(review["snapshot_id"]); content = source_text(app.state.settings, snapshot, path)
         except KeyError: raise HTTPException(404)
-        numbered = "\n".join(f'<span id="L{i}" class="source-line{' selected' if i == line else ''}"><b>{i:5}</b>  {html.escape(text)}</span>' for i, text in enumerate(content.splitlines(), 1))
-        return HTMLResponse(f"<!doctype html><title>{html.escape(path)}</title><style>body{{font:14px ui-monospace;background:#fafbfe;color:#182033;padding:24px}}pre{{white-space:pre-wrap}}.source-line{{display:block;scroll-margin-top:24px}}.source-line b{{color:#8a93a6;font-weight:400}}.source-line.selected{{background:#fff0a8}}</style><h1>{html.escape(path)}</h1><pre>{numbered}</pre><script>document.getElementById('L{line}')?.scrollIntoView()</script>")
+        lines = content.splitlines()
+        end_line = end_line or line
+        if lines and not 1 <= line <= end_line <= len(lines): raise HTTPException(422, 'Range is outside this saved source')
+        project = store.get_project(review['project_id'])
+        return templates.TemplateResponse(request=request, name='source.html', context=context(request, page='review', project=project, review=review, path=path, source_lines=lines, line=line, end_line=end_line))
 
     @app.get("/artifacts/{review_id}/{name}")
     def artifact(review_id: str, name: str, download: bool = False):
@@ -602,10 +748,15 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return {"job_id": enqueue_chat(review_id, data)}
 
     def enqueue_chat(review_id: str, data: ChatRequest):
-        try: store.get_review(review_id)
+        try: review = store.get_review(review_id)
         except KeyError: raise HTTPException(404)
         if data.question_id:
             saved_question(review_id, data.question_id)
+        try:
+            snapshot = store.get_snapshot(review['snapshot_id'])
+            resolve_selection(snapshot, review, data.selection, saved_walkthrough(review, snapshot, data.selection.id.rsplit(':',1)[0]) if data.selection and data.selection.kind == 'walkthrough' else None)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
         return store.enqueue('chat', None, data.model_dump(), review_id=review_id, priority=1)
 
     @app.post("/api/reviews/{review_id}/plans", status_code=202)

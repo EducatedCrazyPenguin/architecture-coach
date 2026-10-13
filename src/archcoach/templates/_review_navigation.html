@@ -1,0 +1,6 @@
+<div class="review-workspace" data-review="{{ review.id }}">
+  <p><a href="/projects/{{ project.id }}">{{ project.name }}</a> · Saved {{ review.created_at[:10] }} · {{ provider_name }} <span id="current-file-status" class="pill subtle" data-review="{{ review.id }}">Checking current files…</span></p>
+  <nav class="tabs" aria-label="Saved review learning">
+    <a href="/reviews/{{ review.id }}#overview">Overview</a><a href="/reviews/{{ review.id }}/map">Map</a><a href="/reviews/{{ review.id }}/walkthrough">Follow a feature</a><a href="/reviews/{{ review.id }}#teaching">Learn</a><a href="/reviews/{{ review.id }}#quiz">Quiz</a><a href="/reviews/{{ review.id }}#changes">Changes</a><a href="/reviews/{{ review.id }}/session">Short session</a><a href="/reviews/{{ review.id }}/glossary">Glossary</a><button class="secondary instructor-toggle" type="button" aria-controls="chat" aria-expanded="false">Ask instructor</button>
+  </nav>
+</div>

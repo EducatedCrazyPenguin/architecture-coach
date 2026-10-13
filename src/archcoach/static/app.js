@@ -1,8 +1,23 @@
 document.addEventListener("DOMContentLoaded", () => {
+  const sessionNode = document.getElementById('learning-session-data');
+  const sessionData = sessionNode ? JSON.parse(sessionNode.textContent) : null;
+  const sessionState = sessionData?.state || {};
+  let sessionQueue = Promise.resolve(), draftTimer;
+  function saveSession(changes) {
+    if (!sessionData) return Promise.resolve();
+    Object.assign(sessionState, changes);
+    sessionQueue = sessionQueue.catch(() => {}).then(async () => {
+      const response = await fetch(`/api/reviews/${sessionData.review_id}/session`, {method:'PATCH', headers:{'Content-Type':'application/json','X-ArchCoach-Token':document.querySelector('meta[name="archcoach-token"]').content}, body:JSON.stringify(changes)});
+      if(!response.ok) throw new Error('Could not save learning position');
+      const status=document.getElementById('session-save-status'); if(status) status.textContent='Learning position and next step saved locally.'; return true;
+    }).catch(() => {const status=document.getElementById('session-save-status'); if(status) status.textContent='Could not save. Keep this page open and retry.'; toast('Could not save your draft. Keep this page open and retry.'); return false;});
+    return sessionQueue;
+  }
   const walkthroughData = document.getElementById("walkthrough-data");
   if (walkthroughData) {
     const trace = JSON.parse(walkthroughData.textContent);
-    let feature = 0, step = 0;
+    let feature = Math.max(0, trace.outlines.findIndex(o=>o.id===sessionState.outline_id));
+    let step = Math.min(sessionState.step || 0, trace.outlines[feature].steps.length-1);
     const select = document.getElementById("feature-select");
     const previous = document.getElementById("step-back"), next = document.getElementById("step-next");
     function evidenceLink(example) {
@@ -13,6 +28,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     function showStep() {
       const outline = trace.outlines[feature], current = outline.steps[step];
+      document.getElementById('feature-entry').textContent = outline.entry || 'Entry mechanism unconfirmed';
+      const askStep=document.getElementById('ask-step');
+      askStep.onclick=()=>{openInstructor();const area=instructor.querySelector('.chat-form textarea');if(area.value.trim()){toast('Your draft is preserved. Send or clear it before changing context.');return;}setSelection({kind:'walkthrough',id:outline.id,step});area.value='Explain this saved step in simple language: what goes in, what work it does, and what could stop it.';saveDraft();};
       document.getElementById("step-title").textContent = current.title;
       document.getElementById("step-explanation").textContent = `${current.explanation}${current.inferred ? " · Runtime interpretation is inferred." : " · Declared in captured source."}`;
       document.getElementById("step-code").textContent = current.example.code;
@@ -28,9 +46,11 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       if (!outline.tests.length) tests.textContent = "No matching captured assertion found within this outline's parser budget.";
     }
-    select.addEventListener("change", () => {feature = Number(select.value); step = 0; showStep();});
-    previous.addEventListener("click", () => {if(step > 0) {step--; showStep();}});
-    next.addEventListener("click", () => {if(step < trace.outlines[feature].steps.length-1) {step++; showStep();}});
+    select.value=String(feature);
+    const rememberStep=()=>saveSession({view:'walkthrough',outline_id:trace.outlines[feature].id,step});
+    select.addEventListener("change", () => {feature = Number(select.value); step = 0; showStep();rememberStep();});
+    previous.addEventListener("click", () => {if(step > 0) {step--; showStep();rememberStep();}});
+    next.addEventListener("click", () => {if(step < trace.outlines[feature].steps.length-1) {step++; showStep();rememberStep();}});
     document.getElementById("walkthrough-map")?.addEventListener("load", showStep);
     showStep();
   }
@@ -44,13 +64,15 @@ document.addEventListener("DOMContentLoaded", () => {
     instructor.hidden = false;
     document.body.classList.add("instructor-open");
     toggle?.setAttribute("aria-expanded", "true");
-    instructor.querySelector("textarea")?.focus({preventScroll:true});
+    if(window.innerWidth<=900) {instructor.setAttribute('role','dialog');instructor.setAttribute('aria-modal','true');document.querySelector('.shell').inert=true;}
+    instructor.querySelector(".chat-form textarea")?.focus({preventScroll:true});
   }
   function closeInstructor() {
     if (!instructor) return;
     instructor.hidden = true;
     document.body.classList.remove("instructor-open");
     toggle?.setAttribute("aria-expanded", "false");
+    document.querySelector('.shell').inert=false;instructor.removeAttribute('role');instructor.removeAttribute('aria-modal');
     returnFocus?.focus({preventScroll:true});
   }
   toggle?.addEventListener("click", () => instructor.hidden ? openInstructor() : closeInstructor());
@@ -69,13 +91,14 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll(".quiz-followup,.practice-question").forEach(button => button.addEventListener("click", () => {
     if (!instructor) return;
     openInstructor();
-    const area = instructor.querySelector("textarea");
+    const area = instructor.querySelector(".chat-form textarea");
     if (area.value.trim()) {toast("Your draft is preserved. Send or clear it before discussing this question.");return;}
     const selected = button.closest(".quiz-card").querySelector('input[type="radio"]:checked');
     const answer = selected ? selected.closest("label").textContent.trim() : "Not answered yet";
     instructor.querySelector('[name="mode"]').value = button.dataset.mode || "answer";
     instructor.querySelector('[name="question_id"]').value = button.dataset.questionId || "";
-    area.value = button.dataset.mode ? `${button.dataset.prompt}\nMy reasoning: ` : `${button.dataset.prompt}\nMy selected answer: ${answer}`;
+    setSelection({kind:"quiz",id:button.dataset.questionId});
+    area.value = button.dataset.mode ? `${button.dataset.prompt}\nMy reasoning: ` : `${button.dataset.prompt}\nMy selected answer: ${answer}`;saveDraft();
   }));
   document.querySelectorAll("[data-dialog]").forEach(button => button.addEventListener("click", () => document.getElementById(button.dataset.dialog)?.showModal()));
   document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => button.closest("dialog")?.close()));
@@ -89,14 +112,16 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll(".quiz-form").forEach(form => form.addEventListener("submit", async event => {
     event.preventDefault();
     const selected = form.querySelector('input[type="radio"]:checked');
-    if (!selected) { toast("Choose an answer first"); return; }
+    const notSure = event.submitter?.value === 'not_sure';
+    if (!selected && !notSure) { toast("Choose an answer or use Not sure"); return; }
     const submit = form.querySelector('button[type="submit"]');
     submit.disabled = true;
-    if (!form.dataset.requestId || form.dataset.requestIndex !== selected.value) {form.dataset.requestId = crypto.randomUUID(); form.dataset.requestIndex = selected.value;}
+    const requestIndex = notSure ? 'not_sure' : selected.value;
+    if (!form.dataset.requestId || form.dataset.requestIndex !== requestIndex) {form.dataset.requestId = crypto.randomUUID(); form.dataset.requestIndex = requestIndex;}
     try {
     const response = await fetch(`/reviews/${form.dataset.review}/quiz/${form.dataset.question}`, {
       method:"POST", headers:{"Content-Type":"application/json","X-ArchCoach-Token":token},
-      body:JSON.stringify({selected_index:Number(selected.value), request_id:form.dataset.requestId, mode:form.dataset.mode || "quiz"})
+      body:JSON.stringify({selected_index:notSure ? null : Number(selected.value), outcome:notSure ? 'not_sure' : 'answered', request_id:form.dataset.requestId, mode:form.dataset.mode || "quiz"})
     });
     if (!response.ok) { toast("Could not check this answer"); return; }
     const result = await response.json();
@@ -111,7 +136,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const feedback = card.querySelector(".quiz-feedback");
     feedback.className = `quiz-feedback visible ${result.correct ? "correct" : "incorrect"}`;
     feedback.replaceChildren();
-    const heading = document.createElement("strong"); heading.textContent = result.correct ? "Correct" : "Not quite";
+    const heading = document.createElement("strong"); heading.textContent = result.outcome === 'not_sure' ? 'Not sure recorded' : result.correct ? "Correct" : "Not quite";
     const explanation = document.createElement("p"); explanation.textContent = result.explanation;
     feedback.append(heading, explanation);
     if (!result.correct) { const answer = document.createElement("p"); const label = document.createElement("b"); label.textContent="Correct answer: "; answer.append(label, document.createTextNode(result.correct_answer)); feedback.append(answer); }
@@ -136,18 +161,59 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("button[data-question]").forEach(button => button.addEventListener("click", () => {
     if (!instructor) return;
     openInstructor();
-    const area = instructor.querySelector('textarea');
+    const area = instructor.querySelector('.chat-form textarea');
     if (area.value.trim()) {toast("Your draft is preserved. Send or clear it before starting another topic.");return;}
     instructor.querySelector('[name="mode"]').value = button.dataset.mode || "answer";
     instructor.querySelector('[name="question_id"]').value = "";
-    area.value = button.dataset.question;
+    setSelection(button.dataset.selection ? JSON.parse(button.dataset.selection) : null);
+    area.value = button.dataset.question;saveDraft();
   }));
+  function setSelection(selection) {
+    const field = instructor?.querySelector('[name="selection"]');
+    if (field) field.value = selection ? JSON.stringify(selection) : "";
+    const label = document.getElementById("instructor-selection-label");
+    if(label) label.textContent = selection ? `Selected ${selection.kind}: ${selection.id || selection.path}` : "Whole saved review";
+    saveSession({selection});
+  }
+  document.querySelectorAll('.instructor-action').forEach(button=>button.addEventListener('click',()=>{openInstructor();const area=instructor.querySelector('.chat-form textarea');if(area.value.trim()){toast('Your draft is preserved. Send or clear it before choosing another explanation.');return;}instructor.querySelector('[name="mode"]').value=button.dataset.mode;area.value=button.dataset.prompt;saveDraft();}));
+  document.getElementById("clear-instructor-selection")?.addEventListener("click", () => setSelection(null));
+  const map = document.getElementById("learning-map");
+  const mapComponents = document.getElementById("map-components");
+  if (map && mapComponents) {
+    const components = JSON.parse(mapComponents.textContent);
+    window.addEventListener("message", event => {
+      if(event.source !== map.contentWindow || event.data?.type !== "archcoach-selected" || event.data.review_id !== document.querySelector(".review-workspace")?.dataset.review || typeof event.data.id !== "string") return;
+      const component = components.find(item => item.id === event.data.id);
+      if(!component) return;
+      const panel = document.getElementById("map-selection"); panel.replaceChildren();
+      const title = document.createElement("h2"); title.textContent = component.name;
+      const description = document.createElement("p"); description.textContent = component.responsibility;
+      const inspect = document.createElement("a"); inspect.href = `/reviews/${sessionData.review_id}/map?component=${encodeURIComponent(component.id)}`; inspect.textContent = "Inspect internal files";
+      const ask = document.createElement("button"); ask.className = "secondary"; ask.type = "button"; ask.textContent = "Ask about this component";
+      ask.addEventListener("click", () => {
+        openInstructor(); const area = instructor.querySelector(".chat-form textarea");
+        if(area.value.trim()) {toast("Your draft is preserved. Clear or send it before changing context.");return;}
+        setSelection({kind:"component",id:component.id}); area.value = "Explain what this component does and why these dependencies exist in plain language.";saveDraft();
+      });
+      const facts=JSON.parse(document.getElementById('map-group-facts').textContent)[component.id];const counts=document.createElement('p');counts.textContent=facts?.known ? `${facts.depends_on} imports to other parts · ${facts.used_by} imports from other parts · ${facts.internal} imports inside this component. A zero is no resolved import recorded, not proof of runtime independence.` : 'File-level counts are unknown: this review lacks saved graph coverage.';panel.append(title, description, counts, inspect, document.createTextNode(' · '), ask);
+    });
+  }
   const chatForm = document.querySelector(".chat-form");
+  function saveDraft() {
+    if(chatForm) return saveSession({draft:chatForm.querySelector('textarea').value,mode:chatForm.elements.mode.value,question_id:chatForm.elements.question_id.value || null,selection:chatForm.elements.selection.value ? JSON.parse(chatForm.elements.selection.value):null});
+    return Promise.resolve();
+  }
   if (chatForm) {
     const progress = instructor.querySelector(".instructor-progress");
     const cancel = instructor.querySelector(".instructor-cancel");
     const submit = chatForm.querySelector('button[type="submit"]');
     const area = chatForm.querySelector("textarea");
+    area.value=sessionState.draft || '';
+    chatForm.elements.mode.value=sessionState.mode || 'answer';chatForm.elements.question_id.value=sessionState.question_id || '';
+    chatForm.addEventListener('change',saveDraft);
+    if(sessionState.selection) setSelection(sessionState.selection);
+    area.addEventListener('input',()=>{clearTimeout(draftTimer);draftTimer=setTimeout(saveDraft,200);});
+    area.addEventListener('blur',saveDraft);
     const review = chatForm.dataset.review;
     let activeJob = null;
     async function refreshConversation() {
@@ -173,6 +239,10 @@ document.addEventListener("DOMContentLoaded", () => {
           }
           article.append(link);
         }
+        if(message.role==='assistant') {
+          const report=document.createElement('details');report.innerHTML='<summary>This seems wrong</summary><form class="learning-issue"><label>What needs correcting?<textarea name="note" required maxlength="2000"></textarea></label><button type="submit" class="secondary">Save private issue</button></form>';
+          const form=report.querySelector('form');form.dataset.review=review;form.dataset.kind='answer';form.dataset.target=message.id;article.append(report);
+        }
         log.append(article);
       }
     }
@@ -193,7 +263,7 @@ document.addEventListener("DOMContentLoaded", () => {
       submit.disabled = true; progress.hidden = false;
       progress.textContent = "Queuing your question…";
       try {
-        const response = await fetch(`/api/reviews/${review}/chat`, {method:"POST", headers:{"Content-Type":"application/json","X-ArchCoach-Token":token}, body:JSON.stringify({message:draft, mode:chatForm.elements.mode.value, question_id:chatForm.elements.question_id.value || null})});
+        const response = await fetch(`/api/reviews/${review}/chat`, {method:"POST", headers:{"Content-Type":"application/json","X-ArchCoach-Token":token}, body:JSON.stringify({message:draft, mode:chatForm.elements.mode.value, question_id:chatForm.elements.question_id.value || null, selection:chatForm.elements.selection.value ? JSON.parse(chatForm.elements.selection.value) : null})});
         if (!response.ok) throw new Error("Could not queue your question. Your draft is preserved.");
         activeJob = (await response.json()).job_id; cancel.hidden = false;
         for (;;) {
@@ -204,7 +274,7 @@ document.addEventListener("DOMContentLoaded", () => {
           if (["complete", "failed", "cancelled"].includes(job.status)) {
             await refreshConversation();
             progress.textContent = job.status === "complete" ? "Answer saved with this review." : `${job.status}: ${job.error || "No completed answer was saved."}`;
-            if (job.status === "complete" && area.value === draft) area.value = "";
+            if (job.status === "complete" && area.value === draft) {area.value = "";saveDraft();}
             break;
           }
           await new Promise(resolve => setTimeout(resolve, 700));
@@ -213,6 +283,34 @@ document.addEventListener("DOMContentLoaded", () => {
       finally { activeJob = null; submit.disabled = false; cancel.hidden = true; }
     });
   }
+  document.querySelectorAll('.session-step').forEach(link=>link.addEventListener('click',async event=>{event.preventDefault();if(await saveSession({position:Number(link.dataset.position)}) === false || await saveDraft() === false)return;location.href=link.href;}));
+  document.getElementById('session-next-step')?.addEventListener('change',event=>saveSession({next_step:event.target.value}));
+  document.querySelectorAll(sessionData ? 'a[href]:not(.session-step)' : '.review-workspace a').forEach(link=>link.addEventListener('click',async event=>{if(event.ctrlKey || event.metaKey || event.shiftKey || link.target || event.defaultPrevented)return;event.preventDefault();clearTimeout(draftTimer);if(await saveDraft() === false)return;location.href=link.href;}));
+  document.querySelector('.exit-form')?.addEventListener('submit',async event=>{if(!sessionData)return;event.preventDefault();clearTimeout(draftTimer);if(await saveDraft() === false)return;const next=document.getElementById('session-next-step');if(next && await saveSession({next_step:next.value}) === false)return;event.target.submit();});
+  window.addEventListener('pagehide',()=>{
+    if(!sessionData || !chatForm)return;
+    const state={...sessionState,draft:chatForm.querySelector('textarea').value,mode:chatForm.elements.mode.value,question_id:chatForm.elements.question_id.value || null,selection:chatForm.elements.selection.value ? JSON.parse(chatForm.elements.selection.value):null};
+    delete state.updated_at;
+    const next=document.getElementById('session-next-step');if(next)state.next_step=next.value;
+    fetch(`/api/reviews/${sessionData.review_id}/session`,{method:'PATCH',keepalive:true,headers:{'Content-Type':'application/json','X-ArchCoach-Token':token},body:JSON.stringify(state)}).catch(()=>{});
+  });
+  document.querySelectorAll('.resolve-learning-issue').forEach(button=>button.addEventListener('click',async()=>{
+    if(await saveDraft() === false)return;button.disabled=true;
+    try {const response=await fetch(`/api/reviews/${sessionData.review_id}/issues/${button.dataset.issue}/resolve`,{method:'POST',headers:{'X-ArchCoach-Token':token}});if(!response.ok)throw new Error();location.reload();}catch{button.disabled=false;toast('Could not resolve this issue. It remains open.');}
+  }));
+  const quizCards=[...document.querySelectorAll('#saved-quiz .quiz-card')];
+  if(quizCards.length) {
+    let index=Math.min(sessionState.quiz_index ?? Math.max(0,quizCards.findIndex(card=>!card.querySelector('.quiz-feedback.visible'))),quizCards.length-1);
+    const showQuestion=()=>{quizCards.forEach((card,i)=>card.hidden=i!==index);document.getElementById('quiz-position').textContent=`Question ${index+1} of ${quizCards.length}`;document.getElementById('quiz-previous').disabled=index===0;document.getElementById('quiz-next').disabled=index===quizCards.length-1;};
+    document.getElementById('quiz-previous').onclick=()=>{if(index>0){index--;showQuestion();saveSession({view:'quiz',quiz_index:index});}};
+    document.getElementById('quiz-next').onclick=()=>{if(index<quizCards.length-1){index++;showQuestion();saveSession({view:'quiz',quiz_index:index});}};
+    showQuestion();saveSession({quiz_index:index});
+  }
+  document.addEventListener('submit',async event=>{
+    const form=event.target.closest('.learning-issue');if(!form)return;
+    event.preventDefault();const button=form.querySelector('button');button.disabled=true;
+    try {const response=await fetch(`/api/reviews/${form.dataset.review}/issues`,{method:'POST',headers:{'Content-Type':'application/json','X-ArchCoach-Token':token},body:JSON.stringify({kind:form.dataset.kind,target_id:form.dataset.target,note:form.elements.note.value})});if(!response.ok)throw new Error();const message=document.createElement('p');message.className='notice warn';message.textContent='Issue saved privately. A flagged question is excluded from future practice; historical attempts are preserved.';form.replaceWith(message);}catch{toast('Could not save the issue. Your note is preserved.');button.disabled=false;}
+  });
   if (!window.htmx) {
     const poll = async () => {
       const state = document.getElementById("job-state");

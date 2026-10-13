@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block content %}
+<header class="page-head"><div><h1>A short learning session</h1><p>About ten minutes, at your pace. Explore freely; there is no timer or locked progression.</p></div></header>
+<ol class="session-path">
+{% for title, explanation, href in [
+('Purpose','Read what this project does.','/reviews/' ~ review.id ~ '#overview'),
+('One part or feature','Follow a declared function or explore the saved map.','/reviews/' ~ review.id ~ '/walkthrough'),
+('Short lesson','Read one saved example before testing yourself.','/reviews/' ~ review.id ~ '#teaching'),
+('Two questions','Try two questions. Not sure is a useful outcome.','/reviews/' ~ review.id ~ '#quiz'),
+('Optional explanation','Explain one responsibility or predict a change in your own words.','/reviews/' ~ review.id ~ '#chat'),
+('Saved next step','Write what you want to return to.','/reviews/' ~ review.id ~ '/session')]
+%}<li class="panel"><h2>{{ loop.index }}. {{ title }}</h2><p>{{ explanation }}</p><a class="secondary button-link session-step" data-position="{{ loop.index0 }}" href="{{ href }}">{{ 'Continue here' if learning_session.position|default(0) == loop.index0 else 'Explore this step' }}</a></li>{% endfor %}
+</ol>
+<label>My next step<textarea id="session-next-step" maxlength="2000" placeholder="For example: explain why this part asks the store to save a name.">{{ learning_session.next_step|default('') }}</textarea></label><p id="session-save-status" role="status">Position and drafts are saved locally with this review. A new review starts its own context.</p>
+<p><a href="/learning">My learning</a> · <a href="/reviews/{{ review.id }}">Free exploration</a></p>
+{% endblock %}

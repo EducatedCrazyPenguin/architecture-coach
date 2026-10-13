@@ -28,8 +28,9 @@
       </nav>
       <form class="exit-form" method="post" action="/exit"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><button class="quiet" type="submit">Exit app</button></form>
     </aside>
-    <main class="content">{% block content %}{% endblock %}</main>
+    <main class="content">{% if page == "review" and review %}{% include "_review_navigation.html" %}{% endif %}{% block content %}{% endblock %}</main>
   </div>
+  {% if page == "review" and review %}{% include "_instructor.html" %}<script id="learning-session-data" type="application/json">{{ {'review_id':review.id,'state':learning_session}|tojson }}</script>{% endif %}
   <div id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

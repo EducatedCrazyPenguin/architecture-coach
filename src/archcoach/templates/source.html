@@ -1,0 +1,8 @@
+{% extends 'base.html' %}
+{% block title %}Saved {{ path }}{% endblock %}
+{% block content %}
+<h1>{{ path }}</h1><p>This file belongs to the saved snapshot. It is not the current project file.</p>
+{% if source_lines %}<form method="get"><input type="hidden" name="path" value="{{ path }}"><label>First line<input type="number" name="line" value="{{ line }}" min="1" max="{{ source_lines|length }}"></label><label>Last line<input type="number" name="end_line" value="{{ end_line }}" min="1" max="{{ source_lines|length }}"></label><button class="secondary" type="submit">Select saved range</button></form><button class="secondary" data-question="Explain these selected saved lines in beginner language. Define terms as you introduce them." data-selection='{{ {"kind":"source","path":path,"line":line,"end_line":end_line}|tojson|forceescape }}'>Ask about these lines</button>{% else %}<p>The captured file is empty.</p>{% endif %}
+<pre class="saved-source">{% for text in source_lines %}<span id="L{{ loop.index }}" class="source-line {{ 'selected' if line <= loop.index <= end_line }}"><b>{{ loop.index }}</b> {{ text }}</span>
+{% endfor %}</pre>
+{% endblock %}

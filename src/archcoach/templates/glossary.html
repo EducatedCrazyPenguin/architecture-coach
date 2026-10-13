@@ -1,0 +1,6 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Architecture words, with this review’s examples</h1><p>Definitions are general explanations. Repository examples below come only from this saved review. A question’s interpretation is still an assessment, not proof of runtime behavior.</p>
+{% for item in glossary %}<article class="panel"><h2>{{ item.term|capitalize }}</h2><p>{{ item.meaning }}</p>{% for example in item.examples %}<details><summary>{{ example.question.question }}</summary><p>{{ example.question.explanations[example.question.correct_index] }}</p>{% for code in example.excerpts %}<a href="/reviews/{{ review.id }}/source?path={{ code.path|urlencode }}&line={{ code.line }}#L{{ code.line }}">{{ code.path }}:{{ code.line }}</a><pre>{{ code.code }}</pre>{% endfor %}</details>{% else %}<p>No repository-specific example was saved for this concept.</p>{% endfor %}</article>{% endfor %}
+<p>APIs, transactions, caches, queues, deployment and scaling need their own evidence. Choose an explicit hypothetical exercise with the instructor if you want to explore one; their presence is not assumed in this repository.</p>
+{% endblock %}

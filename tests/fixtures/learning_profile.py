@@ -86,14 +86,19 @@ class FixtureProvider:
         return {'answer': 'Correct points: you identified the input boundary. Missing reasoning: cite the validation branch. One next question: what does the empty-name branch declare?', 'citations': [{'path': 'service.py', 'line': 3, 'end_line': 4}]}
 
 
-def serve(root: Path):
+def serve(root: Path, reuse=False):
     import uvicorn
     import archcoach.app as app_module
-    settings, ids = seed_profile(root)
+    if reuse:
+        ids=json.loads((root/'ids.json').read_text(encoding='utf-8'))
+        settings=Settings(data_dir=root/'private data',app_dir=Path(__file__).resolve().parents[2]/'src'/'archcoach',port=8878)
+    else:
+        settings, ids = seed_profile(root)
+        (root/'ids.json').write_text(json.dumps(ids),encoding='utf-8')
     app_module.create_adapter = lambda _: FixtureProvider()
     app = app_module.create_app(settings)
     app.get('/api/learning-fixture')(lambda: ids)
-    server = uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=settings.port, log_level='warning'))
+    server = uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=settings.port, log_level='info'))
     def shutdown():
         app.state.shutdown_event.wait(); server.should_exit = True
     threading.Thread(target=shutdown, daemon=True).start()
@@ -101,4 +106,4 @@ def serve(root: Path):
 
 
 if __name__ == '__main__':
-    serve(Path(sys.argv[1]))
+    serve(Path(sys.argv[1]),reuse='--reuse' in sys.argv[2:])
