@@ -27,8 +27,45 @@ L18's required automated and quiet installation checks passed. The actual `.venv
 
 ## Exact pending actions
 
-- **L17:** request a learner usability session and selected-provider explanation/teach-back check. Observe what the learner can explain (purpose, input/output, validation failure, state ownership, change impact); record confusing points privately. Mock feedback is not live-model acceptance.
+- **L17:** complete the revised beginner usability session and selected-provider accuracy check. The later check below supersedes the initial pending-provider state: real inference was authorised and exercised, but accuracy and beginner comprehension did not pass. Observe one idea at a time and keep raw feedback private. Mock feedback is not live-model acceptance.
 - **L18:** verified for its automated/quiet completion criteria. Visible normal-launch acceptance remains an explicitly deferred check requiring a separate request; preserve migration recovery backups on the next normal startup. No full educational/daily-use release is claimed while L17 remains open.
 - The user explicitly authorized full automated renderer/headless release gates on 12 October; those local gates passed. This approval did not authorize real-model inference, downloads/loads or visible desktop launch.
 
-**Next action:** arrange the separately requested learner/live-provider session for L17; optionally verify visible normal launch when explicitly requested. Keep L17 unchecked and these changes active until that evidence exists; do not merge a finished-release claim into main.
+**Next action:** use the revised beginner flow, then arrange a separately requested bounded accuracy check for L17; optionally verify visible normal launch when explicitly requested. Keep L17 unchecked and these changes active until that evidence exists; do not merge a finished-release claim into main.
+
+## Authorised Bonsai teaching check (13 October 2026)
+
+**Evidence: 2/3 — real local transport, cited explanations and snapshot isolation were exercised; sampled teaching contains an unresolved accuracy limitation and no learner comprehension has been observed.**
+
+The user explicitly selected Prism/Bonsai for a bounded headless check, allowing an existing model load. Verified the installed executable against its receipt, found the downloaded weights and verified a free port before starting a hidden task-owned runtime. Used isolated temporary storage and the annotated synthetic mixed-language greeting fixture; no production database was opened, target code executed or cloud provider invoked. Both owned runtimes exited after their checks; raw answers, keys, process receipts and logs remain ignored and private.
+
+- The shared worker produced a complete structured review with **two substantive lessons and ten cited MCQs**, then completed hint, explain-back, hypothetical-design and simpler explanation jobs. Citation locations were locally valid. Reported token usage was retained; it is not a correctness measure. The initial harness took 228.09 seconds.
+- Explain-back correctly corrected a synthetic learner's claims about whitespace validation and restart persistence. After a deliberate disposable edit from `Hello` to `Welcome`, chat still explained `Hello` from its selected snapshot. Hash checks showed reviews/chat did not alter the sample, and saved manifests stayed unchanged. No human learner response was substituted with this synthetic explanation.
+- Manual inspection caught a proposed alternative that did not meet mandatory restart durability. The common design guidance now requires durable storage/recovery for each valid option and labels constraint-breaking options rejected. Common chat guidance now distinguishes unexecuted assertions from test results. The strengthened existing regression failed against the old prompt and passed after the fix; an earlier sandbox run could not create pytest temporary storage and was not counted as the regression failure.
+- A 47.59-second targeted repeat improved the durability explanation and explicitly labelled the test as unexecuted. It still incorrectly said a parameter change breaks an import rather than an unchanged call. Added common guidance distinguishing imports from caller expressions, with a synthetic prompt regression. **This final accuracy guidance has not been rechecked with Bonsai.** Stop further inference after these two attempts under the user's retry rule; do not label structurally valid answers as semantically verified.
+- The sampled quiz placed nine correct answers in the same option position. Its citations and answer reasoning were inspected, but this sample does not establish balanced question presentation or consistent pedagogical quality across generations.
+
+**L17 remains unchecked.** The learner reported the initial code-reading check was too technical for a Python beginner. This is usability feedback, not evidence of comprehension. Resume with the revised beginner flow and a separately requested, bounded accuracy check; observe confusion and qualified change reasoning rather than claiming measured learning or perfect model obedience. Visible desktop launch remains separately pending.
+
+## Beginner-flow correction (13 October 2026)
+
+**Evidence: 2/3 — the feedback establishes an initial usability problem; source and synthetic checks support the correction, but revised learner acceptance and real-model quality remain pending.**
+
+- Reused simpler instructor mode: plain-language purpose and one input/output example before code, defined terms, at most three relevant lines, and one short question. The review's **Explain this simply** action opens a draft without submitting inference or overwriting unsent text. Saved code is available through a keyboard-accessible disclosure after the lesson explanation.
+- New critique guidance uses the same beginner starting point and requests varied MCQ answer positions. The critique prompt participates in the review configuration fingerprint, so a teaching change regenerates a new review instead of silently reusing old teaching. Historical reviews, evidence, conversations and lesson progress are unchanged.
+- The new saved-source beginner regression failed against the old guidance and passed after correction. Focused learning/history checks passed **28/28**; JavaScript syntax and strict specifications passed. These checks establish prompt construction and UI behavior, not model obedience or learning outcomes.
+- No additional inference was run after the two-attempt limit. The last import/call correction and beginner teaching instructions require a new explicitly authorised live check. Do not substitute the earlier sample or mock response for that acceptance.
+
+## Tested correction checkpoint
+
+Application commit: [`ce8e56b9c133aeb6b12caa010f8020d8a7559740`](https://github.com/EducatedCrazyPenguin/architecture-coach/commit/ce8e56b9c133aeb6b12caa010f8020d8a7559740), pushed to `codex/repository-learning`. Main is unchanged while L17 remains open.
+
+- Full unfiltered pytest: **185 passed, zero skips/deselections**, in 57.10 seconds, using isolated temporary fixtures and the real pinned renderer. The existing Starlette/httpx deprecation warning remains; no test was weakened.
+- Full headless browser suite: **six passed** in 1.0 minute. Added checks prove the simpler action selects its mode without a chat POST, preserves an unsent draft, and reveals saved lesson code on demand. Existing map, recall, change lessons, cancellation, settings and review flows passed. The owned test server exited and port 8878 was released.
+- Strict OpenSpec validation: **9/9 passed**. JavaScript syntax, dependency consistency and diff checks passed. These validate documents, prompt construction and synthetic application behavior; they do not prove revised model accuracy.
+- Quietly refreshed the editable package without dependencies, build isolation or network installation. The first pip attempt could not write its sandbox build tracker; the second used ordinary temporary storage and succeeded. Verified installed package 0.1.0, Python 3.12.10, current source/guidance/template, launcher and local HTMX asset without opening the production profile. No matching desktop shortcut was found and none was created. No visible launch was performed.
+- Reviewed staged additions for personal absolute paths and credential patterns; private model answers, learner records, keys, logs, screenshots and acceptance profiles remain ignored. The untracked local `AGENTS.md` is preserved and excluded from publication. Pattern checks are not a certification that arbitrary future data is safe.
+
+Windows CI for this exact application commit: [release checks](https://github.com/EducatedCrazyPenguin/architecture-coach/actions/runs/38330740217) **completed successfully**, including strict specifications, pytest and the headless browser suite. The public run's head SHA matches the tested source commit.
+
+**Progress: 17/18 tasks verified; one remaining (L17).** Required next evidence is beginner usability/comprehension with the revised flow and a separately authorised bounded live check of the final teaching/accuracy guidance. A full educational release is not claimed.
