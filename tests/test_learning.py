@@ -182,7 +182,7 @@ def test_explain_back_uses_source_rubric_and_persists_mode(saved_learning):
         last_usage = {}
         def run_structured(self, prompt, *args, **kwargs):
             captured.append(prompt)
-            return {'answer': 'Correct point: an input enters greet. Missing reasoning: greet owns formatting. Next question: what does it return?', 'citations': [{'path': 'main.py', 'line': 2}]}
+            return {'correct_points': 'An input enters greet.', 'missing_reasoning': 'greet owns formatting.', 'next_question': 'What does it return?', 'citations': [{'path': 'main.py', 'line': 2}]}
     engine = ReviewEngine(app.state.settings, app.state.store)
     engine.codex = FakeProvider()
     engine._run_chat(review, 'A caller stores the greeting.', mode='explain_back', question_id='ownership')
@@ -192,6 +192,60 @@ def test_explain_back_uses_source_rubric_and_persists_mode(saved_learning):
     messages = app.state.store.conversation_for_review(review)['messages']
     assert all(m['learning_context']['mode'] == 'explain_back' for m in messages)
     assert messages[-1]['citations'][0]['valid']
+
+
+@pytest.mark.parametrize('repair_succeeds', [True, False])
+def test_explain_back_requires_complete_feedback_with_one_repair(saved_learning, repair_succeeds):
+    from archcoach.review import ReviewEngine
+    app, _, _, _, review = saved_learning
+    calls = []
+    class FakeProvider:
+        last_usage = {}
+        def run_structured(self, prompt, schema, *args, **kwargs):
+            calls.append(schema.stem)
+            if len(calls) == 2 and repair_succeeds:
+                return {'correct_points': 'You identified the input.',
+                        'missing_reasoning': 'The saved function formats the greeting.',
+                        'next_question': 'What does the function return?',
+                        'citations': [{'path': 'main.py', 'line': 2}]}
+            return {'answer': 'The saved function formats the greeting.',
+                    'citations': [{'path': 'main.py', 'line': 2}]}
+    engine = ReviewEngine(app.state.settings, app.state.store); engine.codex = FakeProvider()
+    if repair_succeeds:
+        engine._run_chat(review, 'The caller supplies a name.', mode='explain_back')
+    else:
+        with pytest.raises(ValueError):
+            engine._run_chat(review, 'The caller supplies a name.', mode='explain_back')
+    assert calls == ['feedback', 'feedback']
+    messages = app.state.store.conversation_for_review(review)['messages']
+    assert len(messages) == 2 and messages[0]['role'] == 'user'
+    assert messages[-1]['status'] == ('complete' if repair_succeeds else 'failed')
+    if repair_succeeds:
+        assert 'Correct points:\nYou identified the input.' in messages[-1]['content']
+        assert 'Missing reasoning:\nThe saved function formats the greeting.' in messages[-1]['content']
+        assert 'One next question: What does the function return?' in messages[-1]['content']
+        assert messages[-1]['citations'][0]['valid']
+    else:
+        assert messages[-1]['citations'] == []
+
+
+@pytest.mark.parametrize('next_question', ['No question', 'What enters? What leaves?', '   ?'])
+def test_feedback_rejects_missing_or_bundled_questions(next_question):
+    from archcoach.models import FeedbackResponse
+    with pytest.raises(ValueError):
+        FeedbackResponse(correct_points='The input is a name.', missing_reasoning='Formatting is separate.',
+                         next_question=next_question)
+
+
+def test_structured_feedback_keeps_source_only_claim_guard(saved_learning):
+    from archcoach.learning import check_teaching_claims
+    from archcoach.models import FeedbackResponse
+    app, _, _, _, review = saved_learning
+    snapshot = app.state.store.get_snapshot(app.state.store.get_review(review)['snapshot_id'])
+    feedback = FeedbackResponse(correct_points='All tests passed', missing_reasoning='Nothing is missing.',
+                                next_question='What does the function do?')
+    with pytest.raises(ValueError, match='cannot claim tests passed'):
+        check_teaching_claims(app.state.settings, snapshot, feedback)
 
 
 def test_beginner_explanation_uses_saved_source_and_one_question(saved_learning):

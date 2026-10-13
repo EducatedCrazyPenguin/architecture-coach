@@ -199,6 +199,7 @@ test('instructor modes preserve drafts, cancellation and focus on narrow screens
   await page.getByRole('button', {name:'Ask the coach'}).click();
   await expect(page.locator('.instructor-progress')).toContainText('Answer saved');
   await expect(page.locator('.chat-log')).toContainText('Missing reasoning');
+  await expect(page.locator('.chat-log')).toContainText('One next question: What does the empty-name branch declare?');
   await area.fill('FAIL_FIXTURE');
   await page.getByRole('button', {name:'Ask the coach'}).click();
   await expect(page.locator('.instructor-progress')).toContainText('failed:');

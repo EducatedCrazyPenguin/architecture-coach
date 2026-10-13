@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["correct_points", "missing_reasoning", "next_question", "citations"],
+  "properties": {
+    "correct_points": {"type": "string", "minLength": 1, "maxLength": 4000, "pattern": "\\S"},
+    "missing_reasoning": {"type": "string", "minLength": 1, "maxLength": 4000, "pattern": "\\S"},
+    "next_question": {"type": "string", "minLength": 2, "maxLength": 1000, "pattern": "^[^?\\s][^?\\n]*\\?$"},
+    "citations": {
+      "type": "array", "maxItems": 12,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["path", "line", "end_line", "label", "valid"],
+        "properties": {
+          "path": {"type": "string"},
+          "line": {"type": "integer", "minimum": 1},
+          "end_line": {"type": ["integer", "null"], "minimum": 1},
+          "label": {"type": "string"},
+          "valid": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}

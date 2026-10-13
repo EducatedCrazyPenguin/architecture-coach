@@ -83,7 +83,12 @@ class FixtureProvider:
                 if kwargs['cancelled']():
                     raise CodexCancelledError('Synthetic cancellation')
                 time.sleep(.1)
-        return {'answer': 'Correct points: you identified the input boundary. Missing reasoning: cite the validation branch. One next question: what does the empty-name branch declare?', 'citations': [{'path': 'service.py', 'line': 3, 'end_line': 4}]}
+        citations = [{'path': 'service.py', 'line': 3, 'end_line': 4}]
+        if schema.stem == 'feedback':
+            return {'correct_points': 'You identified the input boundary.',
+                    'missing_reasoning': 'Cite the validation branch.',
+                    'next_question': 'What does the empty-name branch declare?', 'citations': citations}
+        return {'answer': 'The validation branch declares an error for an empty name.', 'citations': citations}
 
 
 def serve(root: Path, reuse=False):

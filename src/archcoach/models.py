@@ -273,6 +273,20 @@ class ChatResponse(BaseModel):
     citations: list[Evidence] = Field(default_factory=list, max_length=12)
 
 
+class FeedbackResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    correct_points: str = Field(min_length=1, max_length=4000, pattern=r'\S')
+    missing_reasoning: str = Field(min_length=1, max_length=4000, pattern=r'\S')
+    next_question: str = Field(min_length=2, max_length=1000, pattern=r'^[^?\s][^?\n]*\?$')
+    citations: list[Evidence] = Field(default_factory=list, max_length=12)
+
+    @property
+    def answer(self) -> str:
+        return (f'Correct points:\n{self.correct_points}\n\n'
+                f'Missing reasoning:\n{self.missing_reasoning}\n\n'
+                f'One next question: {self.next_question}')
+
+
 class PlanSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
     capability: str = Field(pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$", max_length=80)

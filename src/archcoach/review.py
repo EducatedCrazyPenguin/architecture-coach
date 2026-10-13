@@ -17,7 +17,7 @@ from .config import Settings
 from .context import bounded_history, build_source_packets
 from .db import JobCancelledError, Store
 from .diagram import render_comparison, render_diagram, stable_positions
-from .models import Architecture, ChatResponse, Component, Critique, Evidence, Finding, Lesson, QuizQuestion, Relationship, SourceSummary, utc_now
+from .models import Architecture, ChatResponse, Component, Critique, Evidence, FeedbackResponse, Finding, Lesson, QuizQuestion, Relationship, SourceSummary, utc_now
 from .subprocesses import ProcessCancelled
 from .specs import index_specs, select_requirements
 
@@ -901,6 +901,8 @@ class ReviewEngine:
         self.settings.runtime_dir.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="chat-", dir=self.settings.runtime_dir) as temp:
             root = Path(temp)
+            response_model = FeedbackResponse if mode == 'explain_back' else ChatResponse
+            schema_name = 'feedback.json' if mode == 'explain_back' else 'chat.json'
             prompt_review = dict(review)
             if mode == 'hint':
                 prompt_review['critique'] = {**review['critique'], 'quiz': [practice['question']] if practice['question'] else [], 'lessons': []}
@@ -926,11 +928,11 @@ class ReviewEngine:
                             raise CodexTimeoutError("Instructor exceeded the total time budget")
                         self.codex.last_usage = {}
                         raw = self.codex.run_structured(
-                            prompt, self.settings.schema_dir / "chat.json", root,
+                            prompt, self.settings.schema_dir / schema_name, root,
                             timeout=min(self.settings.codex_call_timeout, remaining), cancelled=is_cancelled,
                             on_event=on_event,
                         )
-                        response = ChatResponse.model_validate(raw)
+                        response = response_model.model_validate(raw)
                         if any(not ref.valid for ref in validate_evidence_items(response.citations, snapshot['manifest'])):
                             raise ValueError('Instructor cited a missing saved file or invalid line range')
                         check_teaching_claims(self.settings,snapshot,response)
