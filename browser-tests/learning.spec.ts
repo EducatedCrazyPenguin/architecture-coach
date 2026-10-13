@@ -9,6 +9,8 @@ let server: ChildProcess;
 let logs: number[] = [];
 let root: string;
 let ids: {project: string; before: string; after: string};
+const localPython = resolve('.venv/Scripts/python.exe');
+const python = existsSync(localPython) ? localPython : 'python';
 
 test('expanded map keeps quiz and contextual instructor reachable', async ({page}) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
@@ -60,8 +62,7 @@ test.beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(),'archcoach-learning-browser-'));
   writeFileSync(resolve('.test-data/last-learning-browser-root.txt'),root);
   logs = [openSync(join(root, 'stdout.log'), 'w'), openSync(join(root, 'stderr.log'), 'w')];
-  const localPython = resolve('.venv/Scripts/python.exe');
-  server = spawn(existsSync(localPython) ? localPython : 'python', ['-m', 'tests.fixtures.learning_profile', root], {
+  server = spawn(python, ['-m', 'tests.fixtures.learning_profile', root], {
     cwd: resolve('.'), env: {...process.env, PYTHONPATH: resolve('src')}, windowsHide: true,
     stdio: ['ignore', logs[0], logs[1]],
   });
@@ -116,7 +117,6 @@ test('uncertainty, session draft and position survive a server restart', async (
   await (await exitResponse).finished();
   await new Promise<void>((done,reject)=>{if(server.exitCode!==null)return done();const timer=setTimeout(()=>reject(new Error('Owned fixture did not exit')),8000);server.once('exit',()=>{clearTimeout(timer);done();});});
   await new Promise<void>((done,reject)=>{const probe=createServer();probe.once('error',reject);probe.listen(8878,'127.0.0.1',()=>probe.close(()=>done()));});
-  const python=resolve('.venv/Scripts/python.exe');
   server=spawn(python,['-m','tests.fixtures.learning_profile',root,'--reuse'],{cwd:resolve('.'),env:{...process.env,PYTHONPATH:resolve('src')},windowsHide:true,stdio:['ignore',logs[0],logs[1]]});
   writeFileSync(join(root,'restarted-server.pid'),String(server.pid));
   await expect.poll(async()=>{try{return (await fetch('http://127.0.0.1:8878/api/health')).status;}catch{return 0;}}).toBe(200);
