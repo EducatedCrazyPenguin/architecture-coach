@@ -41,6 +41,7 @@ def review_configuration_fingerprint(project: dict, settings: Settings) -> str:
         "source_summary_prompt": SOURCE_SUMMARY_PROMPT,
         "critique_prompt": CRITIQUE_PROMPT,
         "quiz_order_version": 1,
+        "relationship_completion_version": 1,
         "codex_command": settings.codex_command,
         "ai_provider": settings.ai_provider,
         "codex_model": settings.codex_model,
@@ -62,6 +63,25 @@ def _slug(text: str, fallback: str) -> str:
     return value[:50]
 
 
+def add_resolved_relationships(architecture: Architecture, edges: list[dict]) -> None:
+    """Retain resolved imports even when an AI model omits them; never guess membership."""
+    owners: dict[str, set[str]] = defaultdict(set)
+    for component in architecture.components:
+        for path in component.source_paths or [source.path for source in component.sources]:
+            owners[path].add(component.id)
+    existing = {(r.source, r.target, r.kind) for r in architecture.relationships if not r.inferred}
+    for edge in edges:
+        source_ids, target_ids = owners[edge['source']], owners[edge['target']]
+        if len(source_ids) != 1 or len(target_ids) != 1:
+            continue
+        source, target = next(iter(source_ids)), next(iter(target_ids))
+        if source == target or (source, target, 'imports') in existing:
+            continue
+        architecture.relationships.append(Relationship(source=source, target=target, kind='imports', label='imports',
+            sources=[Evidence(path=edge['source'], line=edge.get('line', 1), label='Resolved static import')]))
+        existing.add((source, target, 'imports'))
+
+
 def heuristic_architecture(project: dict, analysis: dict) -> Architecture:
     all_files = analysis["files"]
     code_suffixes = {".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".dsa", ".html", ".css", ".sql"}
@@ -80,7 +100,28 @@ def heuristic_architecture(project: dict, analysis: dict) -> Architecture:
         else:
             key = parts[0] if len(parts) > 1 else file["path"]
         grouped.setdefault(key, []).append(file)
-    groups = sorted(grouped.items(), key=lambda item: sum(f["lines"] for f in item[1]), reverse=True)[:12]
+    # Split package boundaries while space permits, exposing imports hidden inside folder boxes.
+    while len(grouped) < 12:
+        candidates = []
+        for name, files in grouped.items():
+            paths = {file['path'] for file in files}
+            if not any(edge['source'] in paths and edge['target'] in paths for edge in analysis['edges']):
+                continue
+            children: dict[str, list[dict]] = {}
+            for file in files:
+                if not file['path'].startswith(name + '/'):
+                    break
+                child = name + '/' + file['path'][len(name)+1:].split('/')[0]
+                children.setdefault(child, []).append(file)
+            else:
+                if 1 <= len(children) <= 13 - len(grouped):
+                    candidates.append((sum(f['lines'] for f in files), name, children))
+        if not candidates:
+            break
+        _, name, children = max(candidates, key=lambda item: (item[0], item[1]))
+        del grouped[name]
+        grouped.update(children)
+    groups = sorted(grouped.items(), key=lambda item: (-sum(f["lines"] for f in item[1]), item[0]))[:12]
     components: list[Component] = []
     path_to_id: dict[str, str] = {}
     used: set[str] = set()
@@ -693,6 +734,7 @@ class ReviewEngine:
                             Evidence(path=edge["source"], line=edge.get("line", 1), label="Resolved static import")
                             for edge in supporting_edges[:3]
                         ]
+            add_resolved_relationships(architecture, analysis['edges'])
             identity_uncertainty: list[dict] = []
             if previous and previous_snapshot:
                 architecture, identity_uncertainty = preserve_component_identity(

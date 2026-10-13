@@ -115,6 +115,38 @@ def test_legacy_and_cross_project_comparisons_are_rejected():
         validate_comparison_records(valid, {**valid, "status": "failed"})
 
 
+def test_missing_model_imports_are_restored_without_inventing_runtime_order():
+    from archcoach.models import Architecture
+    from archcoach.review import add_resolved_relationships
+    model = Architecture.model_validate({'summary': 'Library', 'components': [
+        {'id': name, 'name': name, 'responsibility': name, 'sources': [{'path': name+'.py', 'line': 1}], 'source_paths': [name+'.py']}
+        for name in ('main', 'service', 'store')], 'relationships': []})
+    edges = [{'source': 'main.py', 'target': 'service.py', 'line': 2}, {'source': 'service.py', 'target': 'store.py', 'line': 1}]
+    add_resolved_relationships(model, edges)
+    add_resolved_relationships(model, edges)
+    assert [(r.source, r.target, r.kind, r.inferred) for r in model.relationships] == [('main', 'service', 'imports', False), ('service', 'store', 'imports', False)]
+    assert model.relationships[0].sources[0].line == 2
+    assert model.main_path == []
+    model.components[1].source_paths.append('main.py')
+    model.relationships = []
+    add_resolved_relationships(model, edges)
+    assert [(r.source, r.target) for r in model.relationships] == [('service', 'store')]
+
+
+def test_static_view_splits_folders_that_hide_all_imports():
+    from archcoach.review import heuristic_architecture
+    from archcoach.diagram import to_archify
+    analysis = {'files': [{'path': path, 'lines': 5, 'language': 'python'} for path in
+        ('backend/api.py', 'backend/service.py', 'apps/web/main.ts', 'apps/web/store.ts')],
+        'edges': [{'source': 'backend/api.py', 'target': 'backend/service.py', 'kind': 'imports', 'line': 1},
+                  {'source': 'apps/web/main.ts', 'target': 'apps/web/store.ts', 'kind': 'imports', 'line': 1}]}
+    model = heuristic_architecture({'name': 'Fixture'}, analysis)
+    assert len(model.relationships) == 2
+    assert len(model.components) <= 12
+    assert not model.main_path
+    assert len(to_archify(model, 'Fixture')['connections']) == 2
+
+
 @pytest.mark.parametrize('prompt_name', ['ARCHITECTURE_PROMPT', 'SOURCE_SUMMARY_PROMPT'])
 def test_review_prompt_change_regenerates_without_rewriting_saved_learning(tmp_path, monkeypatch, prompt_name):
     import archcoach.review as review_module
