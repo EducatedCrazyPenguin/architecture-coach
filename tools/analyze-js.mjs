@@ -32,15 +32,19 @@ const host = {
     : [],
 };
 
-let options = {
+const defaultOptions = {
   allowJs: true,
   checkJs: false,
   moduleResolution: ts.ModuleResolutionKind.NodeNext,
   module: ts.ModuleKind.NodeNext,
   resolveJsonModule: true,
 };
-for (const configName of ["tsconfig.json", "jsconfig.json"]) {
-  const configPath = path.join(root, configName);
+const configurationIssues = new Map();
+function optionsFor(file) {
+ let directory = path.dirname(file);
+ while (insideRoot(directory)) {
+ for (const configName of ["tsconfig.json", "jsconfig.json"]) {
+  const configPath = path.join(directory, configName);
   if (host.fileExists(configPath)) {
     const loaded = ts.readConfigFile(configPath, host.readFile);
     if (!loaded.error) {
@@ -49,11 +53,18 @@ for (const configName of ["tsconfig.json", "jsconfig.json"]) {
         readDirectory: () => relativeFiles.map(value => path.resolve(root, value)),
         fileExists: host.fileExists,
         readFile: host.readFile,
-      }, root);
-      options = { ...options, ...parsed.options };
+      }, directory);
+      configurationIssues.set(file, parsed.errors.map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')));
+      return { ...defaultOptions, ...parsed.options };
     }
-    break;
+    configurationIssues.set(file, [ts.flattenDiagnosticMessageText(loaded.error.messageText, '\n')]);
+    return defaultOptions;
   }
+ }
+ if(directory === root) break;
+ directory = path.dirname(directory);
+ }
+ return defaultOptions;
 }
 
 const result = [];
@@ -67,8 +78,93 @@ for (let index = 0; index < absoluteFiles.length; index += 1) {
     : extension === ".js" || extension === ".mjs" || extension === ".cjs" ? ts.ScriptKind.JS
     : ts.ScriptKind.TS;
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
+  const options = optionsFor(file);
   const imports = [];
   const definitions = [];
+  const functions = [];
+  const bindings = {};
+  const handlers = new Set();
+  const literal = node => source.text.slice(node.getStart(source), node.end).slice(0, 160);
+  const location = node => ({line:source.getLineAndCharacterOfPosition(node.getStart(source)).line+1, end_line:source.getLineAndCharacterOfPosition(node.end).line+1});
+  for (const node of source.statements) {
+    if(ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      const target = ts.resolveModuleName(node.moduleSpecifier.text, file, options, host).resolvedModule;
+      const relative = target && host.fileExists(target.resolvedFileName) ? path.relative(root,target.resolvedFileName).replaceAll('\\','/') : null;
+      const names = node.importClause?.namedBindings;
+      if(names && ts.isNamedImports(names)) for(const item of names.elements) bindings[item.name.text] = {path:relative,name:(item.propertyName || item.name).text};
+      if(names && ts.isNamespaceImport(names)) bindings[names.name.text] = {path:relative,name:null};
+    }
+    const exported = !!node.modifiers?.some(m=>m.kind===ts.SyntaxKind.ExportKeyword);
+    if(ts.isFunctionDeclaration(node) && node.name && node.body) functions.push({name:node.name.text, node, exported});
+    if(ts.isVariableStatement(node)) for(const declaration of node.declarationList.declarations) {
+      if(ts.isIdentifier(declaration.name) && declaration.initializer && (ts.isArrowFunction(declaration.initializer) || ts.isFunctionExpression(declaration.initializer))) functions.push({name:declaration.name.text,node:declaration.initializer,exported});
+    }
+  }
+  function declaredNames(name) {
+    if(ts.isIdentifier(name)) return [name.text];
+    if(ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) return name.elements.flatMap(item=>ts.isBindingElement(item)?declaredNames(item.name):[]);
+    return [];
+  }
+  function hasLocalBinding(scope, name) {
+    if(scope.parameters.some(parameter=>declaredNames(parameter.name).includes(name))) return true;
+    let found=false;
+    function visit(node) {
+      if(node !== scope && ts.isFunctionLike(node)) {if(node.name?.text===name)found=true;return;}
+      if(ts.isVariableDeclaration(node) && declaredNames(node.name).includes(name)) found=true;
+      ts.forEachChild(node,visit);
+    }
+    visit(scope);return found;
+  }
+  function findHandlers(node) {
+    if(ts.isJsxAttribute(node) && /^on[A-Z]/.test(node.name.text) && node.initializer && ts.isJsxExpression(node.initializer) && node.initializer.expression && ts.isIdentifier(node.initializer.expression)) {
+      const name=node.initializer.expression.text;let shadowed=false;
+      for(let parent=node.parent;parent;parent=parent.parent) if(ts.isFunctionLike(parent) && hasLocalBinding(parent,name))shadowed=true;
+      if(!shadowed && functions.filter(fn=>fn.name===name).length===1)handlers.add(name);
+    }
+    ts.forEachChild(node,findHandlers);
+  }
+  findHandlers(source);
+  const outlines = functions.slice(0,4).map(fn => {
+    const steps = [{title:`Input boundary: ${fn.name}`,explanation:`Declared inputs: ${fn.node.parameters.map(p=>literal(p.name)).join(', ') || 'none'}. Actual caller values are unknown.`,...location(fn.node),inferred:false}];
+    const shadowed = new Set(fn.node.parameters.flatMap(p=>declaredNames(p.name)));
+    function collectBindings(node) {
+      if(node !== fn.node && ts.isFunctionLike(node)) return;
+      if(ts.isVariableDeclaration(node)) declaredNames(node.name).forEach(name=>shadowed.add(name));
+      if(ts.isBinaryExpression(node) && node.operatorToken.kind===ts.SyntaxKind.EqualsToken && ts.isIdentifier(node.left)) shadowed.add(node.left.text);
+      ts.forEachChild(node,collectBindings);
+    }
+    collectBindings(fn.node);
+    function step(node,title,explanation,branch,extra={}) {if(steps.length<30)steps.push({title,explanation:branch ? `${branch}. ${explanation}`:explanation,...location(node),inferred:true,...extra});}
+    function read(node,branch='') {
+      if(!node || steps.length>=30) return;
+      if(ts.isFunctionLike(node) && node !== fn.node) return;
+      if(ts.isIfStatement(node)) {
+        step(node,'Decision',`Read the condition ${literal(node.expression)}. Only the selected branch applies.`,branch);
+        read(node.thenStatement,`If ${literal(node.expression)} is true`);
+        read(node.elseStatement,`If ${literal(node.expression)} is false`); return;
+      }
+      if(ts.isThrowStatement(node)) {read(node.expression,branch);step(node,'Possible failure','This statement throws. Later statements in this block are not on this failure path.',branch);return;}
+      if(ts.isReturnStatement(node)) {read(node.expression,branch);step(node,'Output','This expression is returned if this point is reached; its value has not been measured.',branch);return;}
+      if(ts.isCallExpression(node)) {
+        read(node.expression,branch);node.arguments.forEach(argument=>read(argument,branch));
+        let target=null; const expression=node.expression;
+        if(ts.isIdentifier(expression) && !shadowed.has(expression.text)) {
+          const matches=functions.filter(f=>f.name===expression.text);
+          target=matches.length===1 ? {path:relativeFile,name:expression.text}:matches.length===0?bindings[expression.text]:null;
+        } else if(ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.expression) && !shadowed.has(expression.expression.text)) {
+          const binding=bindings[expression.expression.text]; if(binding && binding.name===null)target={path:binding.path,name:expression.name.text};
+        }
+        step(node,'Call',`Calls ${literal(expression)} if reached. Dynamic or external targets remain unconfirmed.`,branch,{target:target?.path?target:null});return;
+      }
+      if(ts.isBinaryExpression(node) && node.operatorToken.kind===ts.SyntaxKind.EqualsToken && ts.isPropertyAccessExpression(node.left)) step(node,'State change','This statement assigns a property; storage lifetime is unknown.',branch);
+      if(ts.isBlock(node)) {
+        for(const statement of node.statements) {read(statement,branch); if(ts.isThrowStatement(statement) || ts.isReturnStatement(statement)) break;}
+      } else ts.forEachChild(node,child=>read(child,branch));
+    }
+    read(fn.node.body);
+    if(ts.isArrowFunction(fn.node) && !ts.isBlock(fn.node.body)) step(fn.node.body,'Output','This arrow function returns its expression when reached. Its actual value is unobserved.','');
+    return {name:fn.name,exported:fn.exported,entry:handlers.has(fn.name)?'Direct JSX handler binding':fn.exported?'Exported function':'Declared function',...location(fn.node),steps};
+  });
 
   function recordImport(specifier, node, importKind) {
     const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
@@ -111,6 +207,8 @@ for (let index = 0; index < absoluteFiles.length; index += 1) {
     file: relativeFile,
     imports,
     definitions,
+    outlines: source.parseDiagnostics.length ? [] : outlines,
+    configuration_issues: configurationIssues.get(file) || [],
     diagnostics: source.parseDiagnostics.map(diagnostic => {
       const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
       if (diagnostic.start === undefined) return message;

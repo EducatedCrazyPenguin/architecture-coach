@@ -224,6 +224,7 @@ def analyze_snapshot(
         suffix = Path(path).suffix.lower()
         text = read_blob(settings, item["sha256"]).decode("utf-8", errors="replace")
         definitions: list[dict] = []
+        outlines: list[dict] = []
         imports: list[dict] = []
         diagnostics: list[str] = []
         parser = "unsupported"
@@ -241,6 +242,8 @@ def analyze_snapshot(
                             "name": node.name,
                             "kind": "class" if isinstance(node, ast.ClassDef) else "function",
                             "line": node.lineno,
+                            "end_line": node.end_lineno,
+                            "parameters": [a.arg for a in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]] if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else [],
                         })
                     elif isinstance(node, (ast.Import, ast.ImportFrom)):
                         imports.extend(_resolve_python(path, primary_modules[path], node, aliases))
@@ -257,8 +260,10 @@ def analyze_snapshot(
                 if compiler_result:
                     parser, status = "typescript_compiler", "parsed"
                     definitions = compiler_result.get("definitions", [])
+                    outlines = compiler_result.get('outlines', [])
                     imports = compiler_result.get("imports", [])
                     diagnostics.extend(compiler_result.get("diagnostics", []))
+                    diagnostics.extend(compiler_result.get('configuration_issues', []))
                     if diagnostics:
                         status = "limited"
                 else:
@@ -313,6 +318,7 @@ def analyze_snapshot(
             "definitions": sorted(definitions, key=lambda value: (value["line"], value["name"]))[:100],
             "imports": imports[:100], "parser": parser, "status": status,
             "diagnostics": diagnostics,
+            'outlines': outlines,
         })
         omissions.extend(f"{path}: {diagnostic}" for diagnostic in diagnostics)
 

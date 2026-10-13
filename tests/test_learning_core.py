@@ -10,7 +10,7 @@ def test_walkthrough_model_is_saved_once_per_version(tmp_path):
     model = source_walkthroughs(settings, snapshot, review)
     assert store.save_learning_walkthrough(review['id'], model) == model
     assert store.save_learning_walkthrough(review['id'], {**model, 'notes': ['different draft']}) == model
-    assert store.get_learning_walkthrough(review['id'], 2) is None
+    assert store.get_learning_walkthrough(review['id'], 3) is None
 
 
 def test_practice_context_is_saved_and_answers_are_redacted_for_hints(tmp_path):

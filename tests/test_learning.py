@@ -84,7 +84,7 @@ def test_walkthrough_is_saved_and_runtime_is_qualified(saved_learning):
     app, client, _, project, review = saved_learning
     (Path(project['path']) / 'main.py').write_text('raise RuntimeError("current code must not run")')
     outline = client.get(f'/api/reviews/{review}/walkthrough').json()
-    assert outline['format_version'] == 1
+    assert outline['format_version'] == 2
     assert outline['outlines'][0]['steps'][0]['title'] == 'Boundary: greet'
     assert 'name' in outline['outlines'][0]['steps'][0]['explanation']
     assert all(s['inferred'] for s in outline['outlines'][0]['steps'][1:])
@@ -344,7 +344,7 @@ def test_annotated_teaching_profile_has_real_facts_and_limited_languages(tmp_pat
         assert len(set(question['options'])) == 4
     outline = source_walkthroughs(settings, snapshot, review)
     assert 'Dynamic targets' in outline['qualification']
-    assert not any('client.ts' in s['example']['path'] for o in outline['outlines'] for s in o['steps'])
+    assert any('client.ts' in s['example']['path'] for o in outline['outlines'] for s in o['steps'])
     assert any(s['title'] == 'Failure handling' for o in outline['outlines'] for s in o['steps'])
     # A non-Git DAZ view must not invent runtime or deployment from a script name.
     snapshot['manifest'] = [{**snapshot['manifest'][0], 'path': 'feature.dsa'}]
