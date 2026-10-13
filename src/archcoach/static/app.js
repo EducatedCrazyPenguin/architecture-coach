@@ -181,8 +181,24 @@ document.addEventListener("DOMContentLoaded", () => {
   const mapComponents = document.getElementById("map-components");
   if (map && mapComponents) {
     const components = JSON.parse(mapComponents.textContent);
+    const manifest = JSON.parse(document.getElementById('map-manifest').textContent);
     window.addEventListener("message", event => {
       if(event.source !== map.contentWindow || event.data?.type !== "archcoach-selected" || event.data.review_id !== document.querySelector(".review-workspace")?.dataset.review || typeof event.data.id !== "string") return;
+      if(event.data.kind === 'source') {
+        const {id:path,line,end_line: end,source,target,inferred} = event.data;
+        if(!Object.hasOwn(manifest,path) || !Number.isSafeInteger(line) || !Number.isSafeInteger(end) || line<1 || end<line || end>manifest[path] || typeof inferred !== 'boolean') return;
+        const from=components.find(c=>c.id===source), to=components.find(c=>c.id===target);
+        if(!from || !to) return;
+        if(!(from.source_paths?.length ? from.source_paths : from.sources.map(s=>s.path)).includes(path)) return;
+        const panel=document.getElementById('map-selection');panel.replaceChildren();
+        const title=document.createElement('h2');title.textContent=`${from.name} → ${to.name}`;
+        const explanation=document.createElement('p');explanation.textContent=`${inferred?'Inferred relationship':'Recorded dependency'}. Read its saved evidence; an arrow does not establish execution order.`;
+        const evidence=document.createElement('a');evidence.href=`/reviews/${sessionData.review_id}/source?path=${encodeURIComponent(path)}&line=${line}&end_line=${end}`;evidence.textContent=`Saved evidence: ${path}:${line}`;
+        const ask=document.createElement('button');ask.type='button';ask.className='secondary';ask.textContent='Ask about this connection';
+        ask.addEventListener('click',()=>{openInstructor();const area=instructor.querySelector('.chat-form textarea');if(area.value.trim()){toast('Your draft is preserved. Clear or send it before changing context.');return;}setSelection({kind:'source',path,line,end_line:end});area.value=`Why does ${from.name} depend on ${to.name}? Explain the selected saved evidence and its limits.`;saveDraft();});
+        panel.append(title,explanation,evidence,document.createTextNode(' · '),ask);return;
+      }
+      if(event.data.kind !== undefined) return;
       const component = components.find(item => item.id === event.data.id);
       if(!component) return;
       const panel = document.getElementById("map-selection"); panel.replaceChildren();

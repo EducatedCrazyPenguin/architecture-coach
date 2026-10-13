@@ -103,6 +103,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             selected_review = extra['review']
             extra.setdefault('conversation', store.conversation_for_review(selected_review['id']))
             extra.setdefault('snapshot', store.get_snapshot(selected_review['snapshot_id']))
+            extra['map_manifest'] = {f['path']: f['lines'] for f in extra['snapshot']['manifest']}
             extra['learning_session'] = store.learning_session(selected_review['id'])
             extra['learning_issues'] = store.learning_issues(selected_review['id'])
             extra['flagged_questions'] = {i['target_id'] for i in extra['learning_issues'] if i['kind'] == 'quiz' and not i['resolved_at']}

@@ -320,3 +320,16 @@ def test_draft_saves_reuse_selected_outline_and_page_restores_file(tmp_path,monk
     assert calls==['service.py']
     assert client.get(f'/reviews/{rid}/walkthrough?file=').status_code==200
     assert calls==['service.py', None]
+
+
+def test_map_arrows_have_keyboard_selection_and_saved_evidence(tmp_path, monkeypatch):
+    app, client, ids = workspace(tmp_path, monkeypatch)
+    rid = ids['before']
+    document = client.get(f'/reviews/{rid}/walkthrough-map?role=runtime').text
+    assert 'class="edge" role="button" tabindex="0"' in document
+    assert 'data-relationship="0"' in document
+    assert "kind:'source'" in document and "type:'archcoach-selected'" in document
+    assert 'selectRelationship' in document
+    for suffix in ('', '/map'):
+        assert 'id="map-manifest"' in client.get(f'/reviews/{rid}{suffix}').text
+    assert app.state.store.get_review(rid)['architecture']['relationships'][0]['sources'][0]['path'] == 'main.py'

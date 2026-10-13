@@ -18,6 +18,18 @@ test('expanded map keeps quiz and contextual instructor reachable', async ({page
   await expect(page.getByRole('navigation', {name:'Saved review learning'})).toBeVisible();
   await expect(page.getByRole('link', {name:'Quiz',exact:true})).toBeVisible();
   const map = page.frameLocator('#learning-map');
+  await map.locator('.edge[data-relationship="0"]').press('Enter');
+  await expect(page.locator('#map-selection')).toContainText('Entry boundary → Greeting coordinator');
+  await page.getByRole('button', {name:'Ask about this connection',exact:true}).click();
+  await expect(page.locator('#instructor-selection-label')).toContainText('source: main.py');
+  expect(JSON.parse(await page.locator('#chat [name="selection"]').inputValue())).toEqual({kind:'source',path:'main.py',line:1,end_line:1});
+  await page.locator('#chat .chat-form textarea').fill('');
+  await page.getByRole('button', {name:'Clear selected context'}).click();
+  await page.getByRole('button', {name:'Close instructor',exact:true}).click();
+  await page.locator('#learning-map').evaluate((frame: HTMLIFrameElement)=>window.postMessage({type:'archcoach-selected',kind:'source',review_id:frame.src.split('/')[4],id:'main.py',line:1,end_line:1,source:'entry',target:'store',inferred:false},'*'));
+  await expect(page.locator('#map-selection')).toContainText('Entry boundary → Greeting coordinator');
+  await map.locator('body').evaluate(()=>window.parent.postMessage({type:'archcoach-selected',kind:'source',review_id:location.pathname.split('/')[2],id:'store.py',line:1,end_line:1,source:'entry',target:'store',inferred:false},'*'));
+  await expect(page.locator('#map-selection')).toContainText('Entry boundary → Greeting coordinator');
   await map.locator('.node[data-id="service"]').press('Enter');
   await expect(page.locator('#map-selection')).toContainText('Greeting coordinator');
   await page.getByRole('button', {name:'Ask about this component'}).click();
