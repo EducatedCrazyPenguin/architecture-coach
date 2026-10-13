@@ -1,0 +1,23 @@
+# Verification
+
+L01–L03: learning start and actual provider labels; human component names; lessons and ten quiz questions coexist; bounded actual saved excerpts survive current-file deletion and escape source text; separate teaching exports preserve artifact references; new report generation includes saved excerpts. Legacy metadata defaults are unclassified; unknown concepts are rejected. The annotated fixture checks ten distinct questions, eight concepts and source-backed ranges; provider question quality still needs the real gate.
+
+The beginner correction adds a simpler instructor draft at the review entry and puts saved code behind a disclosure after the explanation. Updated critique guidance requests plain-language roles/examples and varied answer positions. A changed critique prompt invalidates automatic reuse without rewriting older saved records. The feedback revealed an initial usability failure; the revised flow's learner acceptance remains pending.
+
+**Evidence: 2/3 — synthetic saved-source behavior and headless flows are verified; revised real-provider teaching quality and learner comprehension remain unverified.**
+
+See the [shared release checkpoint](../verify-repository-learning-journey/verification.md) for full automated gates, installed-source evidence, commit scope and pending acceptance. This change is not a claim of a fully verified daily-use release.
+
+## New-quiz ordering correction (13 October 2026)
+
+The earlier real sample placed nine correct answers in one position. Fresh AI quizzes now receive deterministic balanced answer positions by stable question ID, rotating options and explanations together before publication. Question order, correct answer meaning, citations and IDs are preserved. Existing saved quizzes, attempts and reused reviews are not rewritten. The configuration fingerprint versions this policy.
+
+Suspected position-dependent wording is rejected through the existing one-repair/limited-review path, rather than shuffled unsafely. The wording guard is conservative and can request a rephrasing; it does not establish semantic correctness. The browser regression now selects the known wrong choice by its text, verifying grading independently of its position.
+
+The initial regression run failed in all seven new scenarios as expected. A follow-up exposed lowercase references; correcting that guard passed **39 focused checks**. The full unfiltered suite passed **195 tests**, zero skips/deselections (49.72 seconds); all **six headless browser scenarios** passed (59.9 seconds); strict specifications passed **9/9**. Existing Starlette/httpx and Node deprecation warnings remain. All test data was synthetic; no production profile was opened. Reliable model teaching and beginner comprehension remain separate L17 checks.
+
+An isolated in-memory mutation inverted the positional-wording guard: all six corresponding regressions failed as expected. The source file hash stayed unchanged, and the six real-source regressions then passed. This did not alter on-disk source or the concurrent local model check.
+
+The resumed real sample balanced all ten correct answers across positions (3/3/2/2), but its lesson self-check still claimed an unexecuted test proved behavior. Common critique guidance now explicitly covers test expectations, temporary versus durable storage and recommended versus enforced interfaces, including lesson answers. A synthetic provider regression failed before this correction and passed afterward; **40 focused checks** and the final unfiltered **196-test** suite passed (51.11 seconds), with **six headless browser scenarios** passing in 1.0 minute and strict documents **9/9**. No skips/deselections or weakened checks were used. This verifies guidance delivery, not model obedience; no further real inference was run after the final correction. See the shared checkpoint for the sample's actual strengths and remaining limitations.
+
+The later review-only sample and app-screen practice preparation are recorded in the shared checkpoint. Architecture/source-summary prompt changes now invalidate reuse; regressions preserve older reviews, quiz attempts, lesson progress and conversations. Generated illustrations carry the same omission warning in the screen and teaching export. Four focused checks, the **198-test** unfiltered suite, **six** headless browser scenarios and **nine** strict documents passed. The new guidance addresses observed errors but has not been verified with another real inference. L17 remains open; manual practice content is explicitly labelled and is not substituted for real-model acceptance.

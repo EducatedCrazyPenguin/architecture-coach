@@ -1,19 +1,23 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, openSync, closeSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
+import { createServer } from "node:net";
 
 let server: ChildProcess;
 let root: string;
 let dataDir: string;
 let projectDir: string;
+let logs: number[] = [];
+let ready = false;
 
 async function waitForServer(): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (server.exitCode !== null) throw new Error(`Test server exited: ${server.exitCode}`);
     try {
       const response = await fetch("http://127.0.0.1:8878/api/health");
-      if (response.ok) return;
+      if (response.ok && (await response.json()).application === "architecture-coach") return;
     } catch {}
     await new Promise(resolveWait => setTimeout(resolveWait, 100));
   }
@@ -39,25 +43,35 @@ async function configureFakeCodex(page: Page): Promise<void> {
 }
 
 test.beforeAll(async () => {
+  await new Promise<void>((done, reject) => {
+    const probe = createServer(); probe.once("error", reject);
+    probe.listen(8878, "127.0.0.1", () => probe.close(() => done()));
+  });
   root = mkdtempSync(join(tmpdir(), "archcoach-browser-"));
   dataDir = join(root, "private data");
   projectDir = join(root, "project with spaces");
   mkdirSync(projectDir, { recursive: true });
   writeFileSync(join(projectDir, "main.py"), "def greet(): return 'hello'\n", "utf8");
+  logs = [openSync(join(root, "stdout.log"), "w"), openSync(join(root, "stderr.log"), "w")];
+  const localPython = resolve(".venv/Scripts/python.exe");
   server = spawn(
-    "python",
+    existsSync(localPython) ? localPython : "python",
     ["-m", "archcoach.cli", "--data-dir", dataDir, "serve", "--port", "8878", "--no-browser"],
-    { cwd: resolve("."), env: { ...process.env, PYTHONPATH: resolve("src") }, stdio: "pipe", windowsHide: true },
+    { cwd: resolve("."), env: { ...process.env, PYTHONPATH: resolve("src") }, stdio: ["ignore", logs[0], logs[1]], windowsHide: true },
   );
+  writeFileSync(join(root, "server.pid"), String(server.pid));
   await waitForServer();
+  ready = true;
 });
 
 test.afterAll(async () => {
   try {
-    const response = await fetch("http://127.0.0.1:8878/");
-    const html = await response.text();
-    const token = html.match(/name="archcoach-token" content="([^"]+)"/)?.[1];
-    if (token) await fetch("http://127.0.0.1:8878/exit", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({_csrf:token}) });
+    if (ready && server?.exitCode === null) {
+      const response = await fetch("http://127.0.0.1:8878/");
+      const html = await response.text();
+      const token = html.match(/name="archcoach-token" content="([^"]+)"/)?.[1];
+      if (token) await fetch("http://127.0.0.1:8878/exit", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({_csrf:token}) });
+    }
   } catch {}
   if (server && server.exitCode === null) {
     await Promise.race([
@@ -72,8 +86,9 @@ test.afterAll(async () => {
       new Promise<void>(resolveWait => setTimeout(resolveWait, 5_000)),
     ]);
   }
+  for (const fd of logs) closeSync(fd);
   try {
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    if (root && root.startsWith(join(tmpdir(), "archcoach-browser-"))) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   } catch {
     // Edge can briefly retain a generated HTML handle while its context closes.
     // The directory contains synthetic fixtures only and the OS temp cleaner can remove it later.
@@ -112,9 +127,9 @@ test("project review, lesson, chat, settings, and comparison use saved evidence"
   await page.getByRole("button", {name:"Ask instructor", exact:true}).click();
   await page.locator("#chat textarea").fill("Keep this unsent question.");
   await page.getByRole("button", {name:"Close instructor"}).click();
-  await firstQuestion.locator('.quiz-option[data-index="1"]').click();
+  await firstQuestion.locator('.quiz-option', {hasText:'database.py'}).click();
   await expect(page.locator("#chat textarea")).toHaveValue("Keep this unsent question.");
-  await expect(firstQuestion.locator('input[value="1"]')).toBeFocused();
+  await expect(firstQuestion.getByRole('radio', {name:/database\.py/})).toBeFocused();
   await firstQuestion.getByRole("button", { name: "Check answer" }).click();
   await expect(firstQuestion.getByText("Not quite", { exact: true })).toBeVisible();
   await expect(firstQuestion.getByText(/Correct answer:/)).toBeVisible();
@@ -151,7 +166,7 @@ test("project review, lesson, chat, settings, and comparison use saved evidence"
   await page.getByRole("link", { name: /Browser fixture/ }).first().click();
   await page.getByRole("button", { name: "Review current files" }).click();
   await waitForJob(page);
-  await expect(page.getByText("Helper", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Helper", exact: true })).toBeVisible();
   await page.getByRole("link", { name: /Browser fixture/ }).first().click();
   await page.getByRole("link", { name: "Compare reviews" }).click();
   await expect(page.getByText("helper", { exact: true })).toBeVisible();

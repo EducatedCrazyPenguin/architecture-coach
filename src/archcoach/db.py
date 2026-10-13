@@ -6,7 +6,7 @@ import sqlite3
 import time
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS quiz_answers (
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);
 """
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 9
 MIGRATION_2 = (
     "ALTER TABLE projects ADD COLUMN normalized_path TEXT",
     "ALTER TABLE projects ADD COLUMN last_attempted_at TEXT",
@@ -98,6 +98,14 @@ MIGRATION_4 = (
 MIGRATION_5 = (
     "CREATE TABLE IF NOT EXISTS improvement_plans (id TEXT PRIMARY KEY, review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, finding_id TEXT NOT NULL, parent_id TEXT, job_id TEXT, created_at TEXT NOT NULL, status TEXT NOT NULL, draft_json TEXT NOT NULL, draft_hash TEXT NOT NULL, validation_json TEXT NOT NULL, provider_json TEXT NOT NULL, receipt_json TEXT NOT NULL DEFAULT '{}')",
     "CREATE INDEX IF NOT EXISTS improvement_plans_review_idx ON improvement_plans(review_id,created_at DESC)",
+)
+MIGRATION_6 = (
+    "CREATE TABLE IF NOT EXISTS quiz_attempts (id TEXT PRIMARY KEY, review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, question_id TEXT NOT NULL, selected_index INTEGER NOT NULL, correct INTEGER NOT NULL, answered_at TEXT NOT NULL, kind TEXT NOT NULL, request_id TEXT NOT NULL UNIQUE)",
+    "CREATE INDEX IF NOT EXISTS quiz_attempts_question_idx ON quiz_attempts(review_id,question_id,answered_at)",
+    "INSERT OR IGNORE INTO quiz_attempts SELECT 'legacy:' || review_id || ':' || question_id, review_id, question_id, selected_index, correct, answered_at, 'legacy', 'legacy:' || review_id || ':' || question_id FROM quiz_answers",
+    "CREATE TABLE IF NOT EXISTS revision_state (review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, question_id TEXT NOT NULL, due_at TEXT NOT NULL, streak INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(review_id,question_id))",
+    "INSERT OR IGNORE INTO revision_state SELECT review_id,question_id,answered_at,0 FROM quiz_answers",
+    "CREATE TABLE IF NOT EXISTS learning_notes (review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, question_id TEXT NOT NULL, content TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(review_id,question_id))",
 )
 
 
@@ -193,8 +201,27 @@ class Store:
                 if version == 4:
                     for statement in MIGRATION_5:
                         conn.execute(statement)
-                    conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
-                    version = SCHEMA_VERSION
+                    conn.execute("PRAGMA user_version=5")
+                    version = 5
+                if version == 5:
+                    for statement in MIGRATION_6:
+                        conn.execute(statement)
+                    conn.execute("PRAGMA user_version=6")
+                    version = 6
+                if version == 6:
+                    columns = {row[1] for row in conn.execute('PRAGMA table_info(messages)')}
+                    if 'learning_context_json' not in columns:
+                        conn.execute("ALTER TABLE messages ADD COLUMN learning_context_json TEXT NOT NULL DEFAULT '{}'")
+                    conn.execute('PRAGMA user_version=7')
+                    version = 7
+                if version == 7:
+                    conn.execute('CREATE TABLE IF NOT EXISTS plan_learning_reports (id TEXT PRIMARY KEY, plan_id TEXT NOT NULL REFERENCES improvement_plans(id) ON DELETE CASCADE, review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, created_at TEXT NOT NULL, note TEXT NOT NULL, format_version INTEGER NOT NULL DEFAULT 1)')
+                    conn.execute('PRAGMA user_version=8')
+                    version = 8
+                if version == 8:
+                    conn.execute('CREATE TABLE IF NOT EXISTS learning_walkthroughs (review_id TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE, format_version INTEGER NOT NULL, model_json TEXT NOT NULL, PRIMARY KEY(review_id,format_version))')
+                    conn.execute('PRAGMA user_version=9')
+                    version = 9
                 if version != SCHEMA_VERSION:
                     raise RuntimeError(f"Unsupported database schema version: {version}")
                 conn.commit()
@@ -630,12 +657,13 @@ class Store:
         citations: list | None = None,
         *,
         status: str = "complete",
+        learning_context: dict | None = None,
     ) -> str:
         message_id = uuid.uuid4().hex
         with self.connect() as conn:
             conn.execute(
-                "INSERT INTO messages(id,conversation_id,role,content,citations_json,created_at,status) VALUES(?,?,?,?,?,?,?)",
-                (message_id, conversation_id, role, content, json.dumps(citations or []), utc_now(), status),
+                "INSERT INTO messages(id,conversation_id,role,content,citations_json,created_at,status,learning_context_json) VALUES(?,?,?,?,?,?,?,?)",
+                (message_id, conversation_id, role, content, json.dumps(citations or []), utc_now(), status, json.dumps(learning_context or {})),
             )
         return message_id
 
@@ -660,14 +688,83 @@ class Store:
             rows = conn.execute("SELECT lesson_id,status FROM lesson_progress WHERE review_id=?", (review_id,)).fetchall()
         return {row[0]: row[1] for row in rows}
 
-    def save_quiz_answer(self, review_id: str, question_id: str, selected_index: int, correct: bool) -> dict[str, Any]:
+    def save_quiz_answer(self, review_id: str, question_id: str, selected_index: int, correct: bool, *, request_id: str | None = None, mode: str = 'quiz') -> dict[str, Any]:
         answered_at = utc_now()
+        request_id = request_id or uuid.uuid4().hex
         with self.connect() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            prior = conn.execute('SELECT * FROM quiz_attempts WHERE request_id=?', (request_id,)).fetchone()
+            if prior:
+                if (prior['review_id'], prior['question_id'], prior['selected_index'], prior['kind'] == 'revision') != (review_id, question_id, selected_index, mode == 'revision'):
+                    raise ValueError('Submission key already belongs to another answer')
+                return {'question_id': question_id, 'selected_index': selected_index, 'correct': bool(prior['correct']), 'answered_at': prior['answered_at'], 'attempt_id': prior['id']}
+            state = conn.execute('SELECT * FROM revision_state WHERE review_id=? AND question_id=?', (review_id, question_id)).fetchone()
+            first = conn.execute('SELECT id FROM quiz_attempts WHERE review_id=? AND question_id=? LIMIT 1', (review_id, question_id)).fetchone() is None
+            kind = 'revision' if mode == 'revision' else ('first' if first else 'retry')
+            attempt_id = uuid.uuid4().hex
+            conn.execute('INSERT INTO quiz_attempts VALUES(?,?,?,?,?,?,?,?)', (attempt_id, review_id, question_id, selected_index, correct, answered_at, kind, request_id))
+            streak = state['streak'] if state else 0
+            if not correct:
+                streak = 0
+            elif state is None or (mode == 'revision' and state['due_at'] <= answered_at):
+                streak += 1
+            days = min(14, 3 * 2 ** min(max(streak - 1, 0), 3)) if correct else 1
+            due = (datetime.fromisoformat(answered_at) + timedelta(days=days)).isoformat()
+            conn.execute('INSERT INTO revision_state VALUES(?,?,?,?) ON CONFLICT(review_id,question_id) DO UPDATE SET due_at=excluded.due_at,streak=excluded.streak', (review_id, question_id, due, streak))
             conn.execute(
                 "INSERT INTO quiz_answers VALUES(?,?,?,?,?) ON CONFLICT(review_id,question_id) DO UPDATE SET selected_index=excluded.selected_index,correct=excluded.correct,answered_at=excluded.answered_at",
                 (review_id, question_id, selected_index, int(correct), answered_at),
             )
-        return {"question_id": question_id, "selected_index": selected_index, "correct": correct, "answered_at": answered_at}
+        return {"question_id": question_id, "selected_index": selected_index, "correct": correct, "answered_at": answered_at, 'attempt_id': attempt_id}
+
+    def quiz_attempts(self, review_id: str, question_id: str | None = None) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute('SELECT * FROM quiz_attempts WHERE review_id=? AND (? IS NULL OR question_id=?) ORDER BY answered_at,rowid', (review_id, question_id, question_id)).fetchall()
+        return [dict(row) for row in rows]
+
+    def learning_records(self) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute("""
+                SELECT r.id AS review_id,r.project_id,r.created_at,r.critique_json,p.name AS project_name,
+                       q.question_id,q.due_at,q.streak,n.content AS note,a.attempt_count,a.first_correct
+                FROM revision_state q JOIN reviews r ON r.id=q.review_id JOIN projects p ON p.id=r.project_id
+                LEFT JOIN (SELECT review_id,question_id,COUNT(*) AS attempt_count,
+                                  MAX(CASE WHEN kind='first' THEN correct END) AS first_correct
+                           FROM quiz_attempts GROUP BY review_id,question_id) a
+                  ON a.review_id=q.review_id AND a.question_id=q.question_id
+                LEFT JOIN learning_notes n ON n.review_id=q.review_id AND n.question_id=q.question_id
+                ORDER BY q.due_at,r.id,q.question_id LIMIT 200
+            """).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            question = next((q for q in json.loads(item.pop('critique_json')).get('quiz', []) if q['id'] == item['question_id']), None)
+            if question:
+                item['question'] = question
+                result.append(item)
+        return result
+
+    def save_learning_note(self, review_id: str, question_id: str, content: str) -> None:
+        with self.connect() as conn:
+            conn.execute('INSERT INTO learning_notes VALUES(?,?,?,?) ON CONFLICT(review_id,question_id) DO UPDATE SET content=excluded.content,updated_at=excluded.updated_at', (review_id, question_id, content, utc_now()))
+
+    def record_plan_learning(self, plan_id: str, review_id: str, note: str) -> None:
+        with self.connect() as conn:
+            conn.execute('INSERT INTO plan_learning_reports(id,plan_id,review_id,created_at,note) VALUES(?,?,?,?,?)', (uuid.uuid4().hex, plan_id, review_id, utc_now(), note))
+
+    def get_learning_walkthrough(self, review_id: str, version: int = 1) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute('SELECT model_json FROM learning_walkthroughs WHERE review_id=? AND format_version=?', (review_id, version)).fetchone()
+        return json.loads(row['model_json']) if row else None
+
+    def save_learning_walkthrough(self, review_id: str, model: dict) -> dict:
+        with self.connect() as conn:
+            conn.execute('INSERT OR IGNORE INTO learning_walkthroughs VALUES(?,?,?)', (review_id, model['format_version'], json.dumps(model)))
+        return self.get_learning_walkthrough(review_id, model['format_version'])
+
+    def plan_learning_reports(self, plan_id: str) -> list[dict]:
+        with self.connect() as conn:
+            return [dict(row) for row in conn.execute('SELECT * FROM plan_learning_reports WHERE plan_id=? ORDER BY created_at DESC,id', (plan_id,))]
 
     def quiz_answers(self, review_id: str) -> dict[str, dict[str, Any]]:
         with self.connect() as conn:

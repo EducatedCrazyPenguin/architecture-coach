@@ -26,6 +26,10 @@ from .plans import PlanConflict, PlanError, PlanService, download_zip, plan_file
 from .capture import CaptureError, fingerprint_project
 from .review import ReviewEngine, compare_saved_reviews, source_text, validate_comparison_records
 from .worker import Worker
+from .learning import lesson_examples, source_walkthroughs, change_examples, concept_examples
+from .models import Architecture, Critique
+from .models import LearningNoteRequest, PlanLearningRequest, utc_now
+from .review import markdown_report
 
 
 def create_app(settings: Settings | None = None, start_worker: bool = True) -> FastAPI:
@@ -110,9 +114,51 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if token != app.state.csrf_token:
             raise HTTPException(403, "Invalid local request token")
 
+    def saved_question(review_id: str, question_id: str):
+        try:
+            review = store.get_review(review_id)
+        except KeyError:
+            raise HTTPException(404, 'Review not found')
+        question = next((q for q in review['critique'].get('quiz', []) if q['id'] == question_id), None)
+        if question is None:
+            raise HTTPException(404, 'Question not found in this saved review')
+        return question
+
+    @app.get('/learning', response_class=HTMLResponse)
+    def learning_library(request: Request, concept: str = '', practice: bool = False):
+        records = store.learning_records()
+        concepts = sorted({item['question'].get('concept', 'unclassified') for item in records})
+        if concept and concept not in concepts:
+            raise HTTPException(422, 'Choose a concept shown in the library')
+        latest = {p['id']: store.latest_review(p['id']) for p in store.list_projects()}
+        now = utc_now()
+        for item in records:
+            current = latest.get(item['project_id'])
+            item['newer_review'] = current['id'] if current and current['id'] != item['review_id'] else None
+            item['due'] = item['due_at'] <= now
+        selected = [item for item in records if not concept or item['question'].get('concept', 'unclassified') == concept]
+        due_count = sum(item['due'] for item in selected)
+        if practice:
+            selected = [item for item in selected if item['due']][:5]
+        return templates.TemplateResponse(request=request, name='learning.html', context=context(
+            request, page='learning', records=selected, concepts=concepts, concept=concept,
+            practice=practice, due_count=due_count))
+
+    @app.post('/reviews/{review_id}/quiz/{question_id}/note')
+    def learning_note(review_id: str, question_id: str, request: Request, content: str = Form(max_length=2000), csrf: str = Form(alias='_csrf')):
+        require_local(request, csrf)
+        saved_question(review_id, question_id)
+        store.save_learning_note(review_id, question_id, LearningNoteRequest(content=content).content)
+        return RedirectResponse('/learning', status_code=303)
+
+    @app.get('/api/reviews/{review_id}/quiz/{question_id}/attempts')
+    def quiz_history(review_id: str, question_id: str):
+        saved_question(review_id, question_id)
+        return store.quiz_attempts(review_id, question_id)
+
     @app.get("/", response_class=HTMLResponse)
     def dashboard(request: Request):
-        return templates.TemplateResponse(request=request, name="dashboard.html", context=context(request, page="projects", codex=codex_status()))
+        return templates.TemplateResponse(request=request, name="dashboard.html", context=context(request, page="projects", codex=codex_status(), provider_name={'codex':'Codex', 'ollama':'Ollama · local', 'lmstudio':'LM Studio · local', 'prism':'Prism · Bonsai local'}[settings.ai_provider]))
 
     @app.get("/settings", response_class=HTMLResponse)
     def settings_page(request: Request, saved: bool = False, refresh: bool = False):
@@ -137,7 +183,55 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         except KeyError: raise HTTPException(404)
         conversation = store.conversation_for_review(review_id)
         quiz_answers = store.quiz_answers(review_id)
-        return templates.TemplateResponse(request=request, name="review.html", context=context(request, page="review", project=project, review=review, snapshot=snapshot, plans=store.list_plans(review_id), lesson_statuses=store.lesson_statuses(review_id), quiz_answers=quiz_answers, quiz_score=sum(item["correct"] for item in quiz_answers.values()), conversation=conversation, current_status="checking"))
+        return templates.TemplateResponse(request=request, name="review.html", context=context(request, page="review", project=project, review=review, snapshot=snapshot, plans=store.list_plans(review_id), lesson_statuses=store.lesson_statuses(review_id), quiz_answers=quiz_answers, quiz_score=sum(item["correct"] for item in quiz_answers.values()), conversation=conversation, current_status="checking", teaching=lesson_examples(settings, snapshot, review['critique']), question_examples=lesson_examples(settings, snapshot, {'lessons': review['critique'].get('quiz', [])}), component_names={c['id']: c['name'] for c in review['architecture']['components']}))
+
+    @app.get('/reviews/{review_id}/learning-report')
+    def learning_report(review_id: str):
+        try:
+            review = store.get_review(review_id)
+            snapshot = store.get_snapshot(review['snapshot_id'])
+            project = store.get_project(review['project_id'])
+        except KeyError:
+            raise HTTPException(404)
+        report = markdown_report(project, Architecture.model_validate(review['architecture']),
+                                 Critique.model_validate(review['critique']), review['changes'], snapshot['coverage'],
+                                 snapshot_id=snapshot['id'], examples=lesson_examples(settings, snapshot, review['critique']))
+        return Response(report, media_type='text/markdown', headers={'Content-Disposition': 'attachment; filename="learning-report.md"'})
+
+    @app.get('/reviews/{review_id}/walkthrough', response_class=HTMLResponse)
+    def walkthrough_page(review_id: str, request: Request):
+        try:
+            review = store.get_review(review_id)
+            project = store.get_project(review['project_id'])
+            snapshot = store.get_snapshot(review['snapshot_id'])
+        except KeyError:
+            raise HTTPException(404)
+        return templates.TemplateResponse(request=request, name='walkthrough.html', context=context(
+            request, page='review', review=review, project=project,
+            walkthrough=saved_walkthrough(review, snapshot),
+            component_names={c['id']: c['name'] for c in review['architecture']['components']}))
+
+    @app.get('/api/reviews/{review_id}/walkthrough')
+    def walkthrough_data(review_id: str):
+        try:
+            review = store.get_review(review_id)
+            return saved_walkthrough(review, store.get_snapshot(review['snapshot_id']))
+        except KeyError:
+            raise HTTPException(404)
+
+    def saved_walkthrough(review, snapshot):
+        saved = store.get_learning_walkthrough(review['id'])
+        return saved if saved is not None else store.save_learning_walkthrough(review['id'], source_walkthroughs(settings, snapshot, review))
+
+    @app.get('/reviews/{review_id}/walkthrough-map', response_class=HTMLResponse)
+    def walkthrough_map(review_id: str):
+        from .diagram import fallback_diagram
+        try:
+            review = store.get_review(review_id)
+        except KeyError:
+            raise HTTPException(404)
+        document = fallback_diagram(Architecture.model_validate(review['architecture']), 'Saved feature map', None)
+        return HTMLResponse(document, headers={'Content-Security-Policy': "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:"})
 
     def enqueue_plan(review_id: str, data: PlanRequest) -> str:
         try:
@@ -222,6 +316,60 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         except KeyError: raise HTTPException(404)
         return templates.TemplateResponse(request=request, name="compare.html", context=context(request, page="compare", project=project, reviews=reviews, before=before_review, after=after_review, changes=changes))
 
+    @app.get('/projects/{project_id}/change-lesson', response_class=HTMLResponse)
+    def change_lesson(project_id: str, request: Request, before: str | None = None, after: str | None = None):
+        try:
+            project, reviews, left, right, changes = comparison(project_id, before, after)
+            examples = change_examples(settings, left, store.get_snapshot(left['snapshot_id']), right, store.get_snapshot(right['snapshot_id']), changes)
+        except KeyError:
+            raise HTTPException(404)
+        return templates.TemplateResponse(request=request, name='change_lesson.html', context=context(request, page='compare', project=project, before=left, after=right, changes=changes, examples=examples))
+
+    @app.get('/learning/compare', response_class=HTMLResponse)
+    def concept_comparison(request: Request, left: str | None = None, right: str | None = None, concept: str = 'responsibilities'):
+        concepts = ['unclassified', 'responsibilities', 'dependencies', 'data_flow', 'state', 'validation', 'testing', 'change_impact', 'tradeoffs']
+        if concept not in concepts:
+            raise HTTPException(422, 'Unknown concept')
+        choices = [{**r, 'project_name': p['name']} for p in store.list_projects() for r in store.list_reviews(p['id']) if r['status'] in {'complete', 'unchanged'}]
+        sides = []
+        for rid in (left, right):
+            if not rid:
+                continue
+            try:
+                review = store.get_review(rid)
+                if review['status'] not in {'complete', 'unchanged'}:
+                    raise HTTPException(409, 'Choose a saved review')
+                snapshot = store.get_snapshot(review['snapshot_id'])
+                sides.append({'review': review, 'project': store.get_project(review['project_id']), 'examples': concept_examples(settings, snapshot, review, concept)})
+            except KeyError:
+                raise HTTPException(404)
+        return templates.TemplateResponse(request=request, name='concept_compare.html', context=context(request, page='learning', choices=choices, left=left, right=right, concept=concept, concepts=concepts, sides=sides))
+
+    @app.get('/plans/{plan_id}/follow-through', response_class=HTMLResponse)
+    def plan_follow_through(plan_id: str, request: Request):
+        plan, review, project = plan_details(plan_id)
+        reviews = [r for r in store.list_reviews(project['id']) if r['status'] in {'complete', 'unchanged'} and r['created_at'] > review['created_at']]
+        return templates.TemplateResponse(request=request, name='plan_learning.html', context=context(request, page='plan', plan=plan, review=review, project=project, reviews=reviews, reports=store.plan_learning_reports(plan_id)))
+
+    @app.post('/plans/{plan_id}/follow-through')
+    def record_plan_follow_through(plan_id: str, request: Request, review_id: str = Form(), note: str = Form(), csrf: str = Form(alias='_csrf')):
+        require_local(request, csrf)
+        plan, review, project = plan_details(plan_id)
+        try:
+            data = PlanLearningRequest(review_id=review_id, note=note)
+            later = store.get_review(data.review_id)
+            validate_comparison_records(review, later)
+            if later['created_at'] <= review['created_at']:
+                raise ValueError('Choose a later saved review')
+        except KeyError:
+            raise HTTPException(404, 'Review not found')
+        except ValidationError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        store.record_plan_learning(plan_id, review_id, data.note)
+        return RedirectResponse(f'/plans/{plan_id}/follow-through', status_code=303)
+
     @app.get("/projects/{project_id}/comparison-artifact")
     def selected_comparison_artifact(project_id: str, before: str, after: str):
         try:
@@ -294,11 +442,13 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
 
     @app.post("/reviews/{review_id}/chat")
-    def chat(review_id: str, request: Request, message: str = Form(), csrf: str = Form(alias="_csrf")):
+    def chat(review_id: str, request: Request, message: str = Form(), csrf: str = Form(alias="_csrf"), mode: str = Form(default='answer'), question_id: str = Form(default='')):
         require_local(request, csrf)
-        try: store.get_review(review_id)
-        except KeyError: raise HTTPException(404)
-        job_id = store.enqueue("chat", None, {"message": message}, review_id=review_id, priority=1)
+        try:
+            data = ChatRequest(message=message, mode=mode, question_id=question_id or None)
+        except ValidationError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        job_id = enqueue_chat(review_id, data)
         return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
 
     @app.post("/reviews/{review_id}/plans")
@@ -345,7 +495,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(422, "Selected option is outside this question")
         correct_index = question["correct_index"]
         correct = data.selected_index == correct_index
-        saved = store.save_quiz_answer(review_id, question_id, data.selected_index, correct)
+        try:
+            saved = store.save_quiz_answer(review_id, question_id, data.selected_index, correct, request_id=data.request_id, mode=data.mode)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
         return {
             **saved,
             "correct_index": correct_index,
@@ -446,9 +599,14 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     @app.post("/api/reviews/{review_id}/chat", status_code=202)
     def api_chat(review_id: str, data: ChatRequest, request: Request):
         require_local(request)
+        return {"job_id": enqueue_chat(review_id, data)}
+
+    def enqueue_chat(review_id: str, data: ChatRequest):
         try: store.get_review(review_id)
         except KeyError: raise HTTPException(404)
-        return {"job_id": store.enqueue("chat", None, data.model_dump(), review_id=review_id, priority=1)}
+        if data.question_id:
+            saved_question(review_id, data.question_id)
+        return store.enqueue('chat', None, data.model_dump(), review_id=review_id, priority=1)
 
     @app.post("/api/reviews/{review_id}/plans", status_code=202)
     def api_create_plan(review_id: str, data: PlanRequest, request: Request):

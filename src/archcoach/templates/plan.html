@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Improvement plan · {{ project.name }}{% endblock %}
-{% block content %}
+{% block content %}<p><a class="secondary button-link" href="/plans/{{ plan.id }}/follow-through">Follow this improvement through</a></p>
 <header class="page-head"><div><a class="back" href="/reviews/{{ review.id }}#improve">← Review finding</a><p class="eyebrow">OpenSpec draft · {{ plan.created_at[:10] }}</p><h1>{{ plan.draft.change_id or 'Plan needs revision' }}</h1><p>For saved review {{ review.id }}. Current files must still match before the plan can be saved.</p></div><span id="current-file-status" class="pill subtle" data-review="{{ review.id }}">Checking current files…</span></header>
 {% if saved %}<div class="notice success">Planning files were saved. Implementation remains a separate Codex task.</div>{% endif %}
 {% if not plan.validation.valid %}<div class="notice error"><b>Draft needs revision.</b> {{ plan.validation.error or plan.validation.issues }} The plan cannot be saved yet.</div>{% endif %}

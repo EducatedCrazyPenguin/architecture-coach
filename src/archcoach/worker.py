@@ -78,6 +78,7 @@ class Worker:
                     conversation_id = self.engine.chat(
                         job["review_id"], job["payload"]["message"], cancelled=cancelled,
                         job_id=job["id"],
+                        mode=job['payload'].get('mode', 'answer'), question_id=job['payload'].get('question_id'),
                     )
                     if cancelled():
                         raise ReviewCancelled("Chat cancelled")

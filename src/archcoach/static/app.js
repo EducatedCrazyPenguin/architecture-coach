@@ -1,4 +1,39 @@
 document.addEventListener("DOMContentLoaded", () => {
+  const walkthroughData = document.getElementById("walkthrough-data");
+  if (walkthroughData) {
+    const trace = JSON.parse(walkthroughData.textContent);
+    let feature = 0, step = 0;
+    const select = document.getElementById("feature-select");
+    const previous = document.getElementById("step-back"), next = document.getElementById("step-next");
+    function evidenceLink(example) {
+      const link = document.createElement("a");
+      link.href = `/reviews/${trace.review_id}/source?path=${encodeURIComponent(example.path)}&line=${example.line}#L${example.line}`;
+      link.textContent = `${example.path}:${example.line}`;
+      return link;
+    }
+    function showStep() {
+      const outline = trace.outlines[feature], current = outline.steps[step];
+      document.getElementById("step-title").textContent = current.title;
+      document.getElementById("step-explanation").textContent = `${current.explanation}${current.inferred ? " · Runtime interpretation is inferred." : " · Declared in captured source."}`;
+      document.getElementById("step-code").textContent = current.example.code;
+      document.getElementById("step-evidence").replaceChildren(evidenceLink(current.example));
+      document.getElementById("step-count").textContent = `${step+1} of ${outline.steps.length}`;
+      previous.disabled = step === 0; next.disabled = step === outline.steps.length-1;
+      document.querySelectorAll(".walkthrough-component").forEach(node => node.classList.toggle("walkthrough-active", node.dataset.component === current.component_id));
+      document.getElementById("walkthrough-map")?.contentWindow?.postMessage({type:"archcoach-select", id:current.component_id}, "*");
+      const tests = document.getElementById("feature-tests"); tests.replaceChildren();
+      for (const example of outline.tests) {
+        const code = document.createElement("pre"); code.textContent = example.code;
+        tests.append(evidenceLink(example), code);
+      }
+      if (!outline.tests.length) tests.textContent = "No matching captured assertion found within this outline's parser budget.";
+    }
+    select.addEventListener("change", () => {feature = Number(select.value); step = 0; showStep();});
+    previous.addEventListener("click", () => {if(step > 0) {step--; showStep();}});
+    next.addEventListener("click", () => {if(step < trace.outlines[feature].steps.length-1) {step++; showStep();}});
+    document.getElementById("walkthrough-map")?.addEventListener("load", showStep);
+    showStep();
+  }
   const token = document.querySelector('meta[name="archcoach-token"]')?.content || "";
   const instructor = document.getElementById("chat");
   const toggle = document.querySelector(".instructor-toggle");
@@ -31,13 +66,16 @@ document.addEventListener("DOMContentLoaded", () => {
       else if(!event.shiftKey && document.activeElement === nodes.at(-1)) {event.preventDefault();nodes[0]?.focus();}
     }
   });
-  document.querySelectorAll(".quiz-followup").forEach(button => button.addEventListener("click", () => {
+  document.querySelectorAll(".quiz-followup,.practice-question").forEach(button => button.addEventListener("click", () => {
+    if (!instructor) return;
     openInstructor();
     const area = instructor.querySelector("textarea");
     if (area.value.trim()) {toast("Your draft is preserved. Send or clear it before discussing this question.");return;}
     const selected = button.closest(".quiz-card").querySelector('input[type="radio"]:checked');
     const answer = selected ? selected.closest("label").textContent.trim() : "Not answered yet";
-    area.value = `${button.dataset.prompt}\nMy selected answer: ${answer}`;
+    instructor.querySelector('[name="mode"]').value = button.dataset.mode || "answer";
+    instructor.querySelector('[name="question_id"]').value = button.dataset.questionId || "";
+    area.value = button.dataset.mode ? `${button.dataset.prompt}\nMy reasoning: ` : `${button.dataset.prompt}\nMy selected answer: ${answer}`;
   }));
   document.querySelectorAll("[data-dialog]").forEach(button => button.addEventListener("click", () => document.getElementById(button.dataset.dialog)?.showModal()));
   document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => button.closest("dialog")?.close()));
@@ -54,13 +92,15 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!selected) { toast("Choose an answer first"); return; }
     const submit = form.querySelector('button[type="submit"]');
     submit.disabled = true;
+    if (!form.dataset.requestId || form.dataset.requestIndex !== selected.value) {form.dataset.requestId = crypto.randomUUID(); form.dataset.requestIndex = selected.value;}
     try {
     const response = await fetch(`/reviews/${form.dataset.review}/quiz/${form.dataset.question}`, {
       method:"POST", headers:{"Content-Type":"application/json","X-ArchCoach-Token":token},
-      body:JSON.stringify({selected_index:Number(selected.value)})
+      body:JSON.stringify({selected_index:Number(selected.value), request_id:form.dataset.requestId, mode:form.dataset.mode || "quiz"})
     });
     if (!response.ok) { toast("Could not check this answer"); return; }
     const result = await response.json();
+    delete form.dataset.requestId;
     const card = form.closest(".quiz-card");
     card.querySelectorAll(".quiz-option").forEach(option => {
       const index = Number(option.dataset.index);
@@ -93,8 +133,14 @@ document.addEventListener("DOMContentLoaded", () => {
     currentStatus.textContent = labels[result.status] || "Current-file status unavailable";
     currentStatus.className = `pill ${result.status === "matches" ? "ok" : "warn"}`;
   }).catch(() => { currentStatus.textContent = "Current-file status unavailable"; currentStatus.className = "pill warn"; });
-  document.querySelectorAll(".suggestions button[data-question]").forEach(button => button.addEventListener("click", () => {
-    const area = document.querySelector('.chat-form textarea'); if (area) { area.value = button.dataset.question; area.focus(); }
+  document.querySelectorAll("button[data-question]").forEach(button => button.addEventListener("click", () => {
+    if (!instructor) return;
+    openInstructor();
+    const area = instructor.querySelector('textarea');
+    if (area.value.trim()) {toast("Your draft is preserved. Send or clear it before starting another topic.");return;}
+    instructor.querySelector('[name="mode"]').value = button.dataset.mode || "answer";
+    instructor.querySelector('[name="question_id"]').value = "";
+    area.value = button.dataset.question;
   }));
   const chatForm = document.querySelector(".chat-form");
   if (chatForm) {
@@ -147,7 +193,7 @@ document.addEventListener("DOMContentLoaded", () => {
       submit.disabled = true; progress.hidden = false;
       progress.textContent = "Queuing your question…";
       try {
-        const response = await fetch(`/api/reviews/${review}/chat`, {method:"POST", headers:{"Content-Type":"application/json","X-ArchCoach-Token":token}, body:JSON.stringify({message:draft})});
+        const response = await fetch(`/api/reviews/${review}/chat`, {method:"POST", headers:{"Content-Type":"application/json","X-ArchCoach-Token":token}, body:JSON.stringify({message:draft, mode:chatForm.elements.mode.value, question_id:chatForm.elements.question_id.value || null})});
         if (!response.ok) throw new Error("Could not queue your question. Your draft is preserved.");
         activeJob = (await response.json()).job_id; cancel.hidden = false;
         for (;;) {

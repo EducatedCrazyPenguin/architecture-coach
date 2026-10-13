@@ -1,0 +1,5 @@
+# Tasks
+
+- [x] L16 Add annotated educational fixtures and regressions for supported Python, mixed languages, DAZ, ambiguous source and alternate valid designs.
+- [ ] L17 Verify the headless learning journey; BLOCKED: the initial learner check was too technical. A later real Bonsai review improved the lessons but still invented a CLI label, used ambiguous exception assumptions and miscounted greeting spaces. The user selected actual app screens; an isolated, manually checked offline practice session is prepared, with learner feedback pending. Final guidance changes still need separately authorised real-model verification. Automated flow passed; exact limitations and the next concrete action are in verification.md.
+- [x] L18 Run required release gates and verify quiet daily installation/shortcut metadata; full local and Windows CI gates, editable upgrade, installed launcher start/reuse/exit and metadata checks passed. No existing shortcut was found. Visible normal launch remains explicitly pending unless requested, per the roadmap.

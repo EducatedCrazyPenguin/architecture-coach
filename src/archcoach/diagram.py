@@ -136,7 +136,7 @@ def render_diagram(
     return {"diagram": str(html_path), "architecture_ir": str(ir_path), "renderer": "fallback", "error": "Bundled Archify or Node.js was not found", "attempts": 0}
 
 
-def fallback_diagram(architecture: Architecture, title: str, target: Path) -> None:
+def fallback_diagram(architecture: Architecture, title: str, target: Path | None) -> str:
     """Write a dependency graph that remains useful when Archify is unavailable."""
     positions, graph_width, graph_height = _fallback_positions(architecture)
     node_width, node_height = 250, 116
@@ -203,11 +203,14 @@ def fallback_diagram(architecture: Architecture, title: str, target: Path) -> No
 const components={safe_payload};let scale=1;const canvas=document.getElementById('canvas'),viewport=document.getElementById('viewport'),details=document.getElementById('details');
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c]));
 function relationList(items,direction){{if(!items.length)return '<p>None confirmed.</p>';return '<ul>'+items.map(r=>`<li>${{direction==='out'?'<b>'+esc(components[r.target]?.name||r.target)+'</b>':'<b>'+esc(components[r.source]?.name||r.source)+'</b>'}} — ${{esc(r.label)}}${{r.inferred?' <em>(inferred)</em>':''}}</li>`).join('')+'</ul>'}}
+window.addEventListener('message',event=>{{if(event.source===parent&&event.data?.type==='archcoach-select'){{if(Object.hasOwn(components,event.data.id))select(event.data.id);else if(event.data.id===null){{document.querySelectorAll('.node,.edge').forEach(n=>n.classList.remove('active','dim'));details.textContent='Component ownership is unknown or ambiguous for this saved step.'}}}}}});
 function select(id){{const c=components[id];if(!c)return;document.querySelectorAll('.node').forEach(n=>n.classList.toggle('active',n.dataset.id===id));document.querySelectorAll('.edge').forEach(e=>{{const active=e.dataset.source===id||e.dataset.target===id;e.classList.toggle('active',active);e.classList.toggle('dim',!active)}});const sourceItems=c.sources.map(s=>`<li><code>${{esc(s.path)}}:${{s.line}}${{s.end_line?'–'+s.end_line:''}}</code>${{s.label?' — '+esc(s.label):''}}</li>`).join('');const files=c.files.map(f=>`<li><code>${{esc(f)}}</code></li>`).join('');details.innerHTML=`<span class="badge">${{esc(c.kind)}}</span><h2>${{esc(c.name)}}</h2><p>${{esc(c.responsibility)}}</p><h3>Representative evidence</h3><ul>${{sourceItems}}</ul><h3>Source membership (${{c.files.length}})</h3><ul>${{files}}</ul><h3>Depends on</h3>${{relationList(c.outgoing,'out')}}<h3>Used by</h3>${{relationList(c.incoming,'in')}}`;}}
 document.querySelectorAll('.node').forEach(node=>{{node.addEventListener('click',()=>select(node.dataset.id));node.addEventListener('keydown',event=>{{if(event.key==='Enter'||event.key===' '){{event.preventDefault();select(node.dataset.id)}}}})}});
 function applyScale(){{canvas.style.transform=`scale(${{scale}})`;viewport.style.setProperty('--scale',scale)}}document.getElementById('zoom-in').onclick=()=>{{scale=Math.min(1.8,scale+.15);applyScale()}};document.getElementById('zoom-out').onclick=()=>{{scale=Math.max(.45,scale-.15);applyScale()}};document.getElementById('reset').onclick=()=>{{scale=Math.min(1,Math.max(.45,(viewport.clientWidth-30)/{graph_width}));applyScale();viewport.scrollTo(0,0)}};window.addEventListener('load',()=>{{document.getElementById('reset').click();select({safe_initial})}});
 </script></body></html>'''
-    target.write_text(document, encoding="utf-8")
+    if target is not None:
+        target.write_text(document, encoding="utf-8")
+    return document
 
 
 def _fallback_positions(architecture: Architecture) -> tuple[dict[str, tuple[int, int]], int, int]:
