@@ -154,6 +154,12 @@ test('saved teaching, cross-module map, recall and change lesson', async ({page}
   await expect(page.locator('#step-code')).toContainText('def handle');
   await expect(page.locator('.walkthrough-active')).toContainText('Greeting coordinator');
   await expect(page.frameLocator('#walkthrough-map').locator('.node.active')).toHaveAttribute('data-id', 'service');
+  await page.getByRole('button', {name:'Ask about this step',exact:true}).click();
+  const selected = JSON.parse(await page.locator('#chat [name="selection"]').inputValue());
+  expect(selected).toEqual({kind:'walkthrough',id:'main.py:2',step:2,outline_version:3});
+  await page.getByRole('button', {name:'Ask the coach'}).click();
+  await expect(page.locator('.instructor-progress')).toContainText('Answer saved');
+  await page.getByRole('button', {name:'Close instructor',exact:true}).click();
   await page.goto('/learning?practice=true');
   const question = page.locator('.quiz-card').first();
   await question.locator('input[value="0"]').check();
@@ -213,6 +219,43 @@ test('instructor modes preserve drafts, cancellation and focus on narrow screens
   await expect(page.locator('#chat')).toBeHidden();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   expect(errors).toEqual([]);
+});
+
+
+test('an earlier step context blocks sending and keeps the unsent draft', async ({page}) => {
+  const url = `http://127.0.0.1:8878/reviews/${ids.before}`;
+  await page.route(url, async route => {
+    const response = await route.fetch();
+    const body = (await response.text()).replace(/(<script id="learning-session-data" type="application\/json">)(.*?)(<\/script>)/s, (_, start, data, end) => {
+      const saved = JSON.parse(data);
+      saved.state.selection = {kind:'walkthrough',id:'main.py:2',step:1};
+      saved.state.draft = 'Keep the earlier step question';
+      return start + JSON.stringify(saved) + end;
+    });
+    await route.fulfill({response,body});
+  });
+  await page.goto(url);
+  await page.unroute(url);
+  await page.getByRole('button',{name:'Ask instructor',exact:true}).click();
+  await expect(page.locator('#instructor-selection-label')).toContainText('Earlier reading format');
+  const area = page.locator('#chat .chat-form textarea');
+  await expect(area).toHaveValue('Keep the earlier step question');
+  const patch = page.waitForRequest(request => request.method()==='PATCH' && request.url().endsWith('/session') && request.postDataJSON().draft==='Keep this updated draft');
+  const savedDraft = page.waitForResponse(response => response.request().method()==='PATCH' && response.url().endsWith('/session') && response.request().postDataJSON().draft==='Keep this updated draft' && response.status()===200);
+  await area.fill('Keep this updated draft');
+  expect((await patch).postDataJSON()).not.toHaveProperty('selection');
+  await savedDraft;
+  let sent = 0;
+  page.on('request',request=>{if(request.method()==='POST' && request.url().endsWith('/chat')) sent++;});
+  await page.getByRole('button',{name:'Ask the coach'}).click();
+  await expect(page.locator('.instructor-progress')).toContainText('Select the saved step again');
+  expect(sent).toBe(0);
+  await page.reload();
+  await page.getByRole('button',{name:'Ask instructor',exact:true}).click();
+  await expect(area).toHaveValue('Keep this updated draft');
+  await page.getByRole('button',{name:'Clear selected context'}).click();
+  await area.fill('');
+  await page.getByRole('button',{name:'Close instructor',exact:true}).click();
 });
 
 

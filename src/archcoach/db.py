@@ -769,7 +769,7 @@ class Store:
         with self.connect() as conn:
             conn.execute('INSERT INTO plan_learning_reports(id,plan_id,review_id,created_at,note) VALUES(?,?,?,?,?)', (uuid.uuid4().hex, plan_id, review_id, utc_now(), note))
 
-    def get_learning_walkthrough(self, review_id: str, version: int = 2) -> dict | None:
+    def get_learning_walkthrough(self, review_id: str, version: int = 3) -> dict | None:
         with self.connect() as conn:
             row = conn.execute('SELECT model_json FROM learning_walkthroughs WHERE review_id=? AND format_version=?', (review_id, version)).fetchone()
         return json.loads(row['model_json']) if row else None

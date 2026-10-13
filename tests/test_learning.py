@@ -84,7 +84,7 @@ def test_walkthrough_is_saved_and_runtime_is_qualified(saved_learning):
     app, client, _, project, review = saved_learning
     (Path(project['path']) / 'main.py').write_text('raise RuntimeError("current code must not run")')
     outline = client.get(f'/api/reviews/{review}/walkthrough').json()
-    assert outline['format_version'] == 2
+    assert outline['format_version'] == 3
     assert outline['outlines'][0]['steps'][0]['title'] == 'Boundary: greet'
     assert 'name' in outline['outlines'][0]['steps'][0]['explanation']
     assert all(s['inferred'] for s in outline['outlines'][0]['steps'][1:])

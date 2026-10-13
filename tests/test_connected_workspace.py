@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from archcoach.app import create_app
@@ -320,6 +321,150 @@ def test_draft_saves_reuse_selected_outline_and_page_restores_file(tmp_path,monk
     assert calls==['service.py']
     assert client.get(f'/reviews/{rid}/walkthrough?file=').status_code==200
     assert calls==['service.py', None]
+
+
+def test_python_dictionary_calls_follow_entry_order(tmp_path):
+    import hashlib
+    from archcoach.learning import source_walkthroughs
+    from archcoach.db import Store
+    settings, ids = seed_profile(tmp_path); store = Store(settings.db_path)
+    review = store.get_review(ids['before']); snapshot = store.get_snapshot(review['snapshot_id'])
+    text = ('def key_one():\n    return "one"\ndef value_one():\n    return 1\n'
+            'def key_two():\n    return "two"\ndef value_two():\n    return 2\n'
+            'def run():\n    return {key_one(): value_one(), **extra(), key_two(): value_two()}\n')
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    blob = settings.blob_dir / digest[:2] / digest; blob.parent.mkdir(exist_ok=True); blob.write_text(text)
+    snapshot['manifest'] = [{'path': 'dictionary.py', 'sha256': digest, 'lines': len(text.splitlines())}]
+    result = source_walkthroughs(settings, snapshot, review, 'dictionary.py')
+    outline = next(o for o in result['outlines'] if o['name'] == 'dictionary.py · run')
+    calls = [s for s in outline['steps'] if s['title'] == 'Call site']
+    assert [s['explanation'].split('Expression calls ')[1].split('.')[0]
+            for s in calls] == ['key_one', 'value_one', 'extra', 'key_two', 'value_two']
+    assert all(s['example']['path'] == 'dictionary.py' and s['example']['line'] == 10 for s in calls)
+    assert 'Target unresolved' in calls[2]['explanation']
+
+
+@pytest.mark.parametrize('operator', ['and', 'or'])
+def test_short_circuit_calls_are_conditional_in_both_languages(tmp_path, operator):
+    import hashlib
+    from archcoach.learning import source_walkthroughs
+    from archcoach.db import Store
+    settings, ids = seed_profile(tmp_path); store = Store(settings.db_path)
+    review = store.get_review(ids['before']); snapshot = store.get_snapshot(review['snapshot_id'])
+    js_operator = '&&' if operator == 'and' else '||'
+    texts = {'conditional.py': f'def run():\n    return check() {operator} save()\n',
+             'conditional.ts': f'export function run() {{ return check() {js_operator} save(); }}\n'}
+    snapshot['manifest'] = []
+    for path, text in texts.items():
+        digest = hashlib.sha256(text.encode()).hexdigest()
+        blob = settings.blob_dir / digest[:2] / digest; blob.parent.mkdir(exist_ok=True); blob.write_text(text)
+        snapshot['manifest'].append({'path': path, 'sha256': digest, 'lines': len(text.splitlines())})
+    for path in texts:
+        outline = next(o for o in source_walkthroughs(settings, snapshot, review, path)['outlines'] if o['name'] == path + ' · run')
+        calls = [s for s in outline['steps'] if s['title'] in {'Call', 'Call site'}]
+        assert len(calls) == 2 and 'check' in calls[0]['explanation'] and 'save' in calls[1]['explanation']
+        assert not calls[0]['explanation'].startswith('If ')
+        assert calls[1]['explanation'].startswith('If earlier')
+        assert all(s['inferred'] and s['example']['path'] == path for s in calls)
+
+
+def test_python_comprehension_order_is_omitted_instead_of_guessed(tmp_path):
+    import hashlib
+    from archcoach.learning import source_walkthroughs
+    from archcoach.db import Store
+    settings, ids = seed_profile(tmp_path); store = Store(settings.db_path)
+    review = store.get_review(ids['before']); snapshot = store.get_snapshot(review['snapshot_id'])
+    text = 'def run():\n    return [make(x) for x in load() if guard(x)]\n'
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    blob = settings.blob_dir / digest[:2] / digest; blob.parent.mkdir(exist_ok=True); blob.write_text(text)
+    snapshot['manifest'] = [{'path': 'comprehension.py', 'sha256': digest, 'lines': 2}]
+    result = source_walkthroughs(settings, snapshot, review)
+    outline = result['outlines'][0]
+    assert not any(s['title'] == 'Call site' for s in outline['steps'])
+    assert any('Comprehension' in n and 'omitted' in n for n in result['notes'])
+    assert outline['steps'][-1]['title'] == 'Output boundary'
+    assert '[make(x)' in outline['steps'][-1]['example']['code']
+
+
+def test_fresh_outline_version_preserves_prior_derived_view(tmp_path, monkeypatch):
+    app, client, ids = workspace(tmp_path, monkeypatch); store = app.state.store
+    rid = ids['before']; original = store.get_review(rid)
+    legacy = {'format_version': 2, 'review_id': rid, 'outlines': [], 'notes': ['Earlier derived format']}
+    store.save_learning_walkthrough(rid, legacy)
+    current = client.get(f'/api/reviews/{rid}/walkthrough').json()
+    assert current['format_version'] == 3 and current['outlines']
+    assert store.get_learning_walkthrough(rid, 2) == legacy
+    assert store.get_learning_walkthrough(rid, 3) == current
+    assert store.get_review(rid) == original
+
+
+def test_step_context_requires_matching_derived_version_and_preserves_draft(tmp_path, monkeypatch):
+    app, client, ids = workspace(tmp_path, monkeypatch)
+    rid = ids['before']; headers = {'X-ArchCoach-Token': app.state.csrf_token}
+    outline = client.get(f'/api/reviews/{rid}/walkthrough?file=service.py').json()['outlines'][0]
+    selection = {'kind': 'walkthrough', 'id': outline['id'], 'step': 1}
+    session_url = f'/api/reviews/{rid}/session'
+    app.state.store.save_learning_session(rid, {'draft': 'Why does this happen?', 'selection': selection})
+    assert client.patch(session_url, headers=headers, json={'draft': 'Keep my question'}).status_code == 200
+    for version in (None, 2, 99):
+        stale = selection if version is None else {**selection, 'outline_version': version}
+        response = client.post(f'/api/reviews/{rid}/chat', headers=headers, json={'message': 'Why?', 'selection': stale})
+        assert response.status_code == 422 and 'select the saved step again' in response.text
+    assert app.state.store.learning_session(rid)['draft'] == 'Keep my question'
+    current = {**selection, 'outline_version': 3}
+    response = client.post(f'/api/reviews/{rid}/chat', headers=headers, json={'message': 'Why?', 'selection': current})
+    assert response.status_code == 202
+    assert app.state.store.get_job(response.json()['job_id'])['payload']['selection']['outline_version'] == 3
+
+
+def test_typescript_conditions_and_missing_value_branches_keep_call_order(tmp_path):
+    import hashlib
+    from archcoach.learning import source_walkthroughs
+    from archcoach.db import Store
+    settings, ids = seed_profile(tmp_path); store = Store(settings.db_path)
+    review = store.get_review(ids['before']); snapshot = store.get_snapshot(review['snapshot_id'])
+    text = ('export function run() { if(check()) return left(); else return right(); }\n'
+            'export function choose() { return check() ? left() : right(); }\n'
+            'export function fallback() { return primary() ?? secondary(); }\n')
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    blob = settings.blob_dir / digest[:2] / digest; blob.parent.mkdir(exist_ok=True); blob.write_text(text)
+    snapshot['manifest'] = [{'path': 'conditions.ts', 'sha256': digest, 'lines': 3}]
+    result = source_walkthroughs(settings, snapshot, review)
+    for name in ('run', 'choose'):
+        outline = next(o for o in result['outlines'] if o['name'] == 'conditions.ts · ' + name)
+        calls = [s for s in outline['steps'] if s['title'] == 'Call']
+        assert len(calls) == 3 and 'Calls check' in calls[0]['explanation']
+        assert 'is true' in calls[1]['explanation'] and 'Calls left' in calls[1]['explanation']
+        assert 'is false' in calls[2]['explanation'] and 'Calls right' in calls[2]['explanation']
+        assert outline['steps'].index(calls[0]) < next(i for i, s in enumerate(outline['steps']) if s['title'] == 'Decision')
+    fallback = next(o for o in result['outlines'] if o['name'] == 'conditions.ts · fallback')
+    assert 'null or undefined' in next(s for s in fallback['steps'] if s['title'] == 'Call' and 'secondary' in s['explanation'])['explanation']
+
+
+def test_python_callee_keeps_its_callers_conditional_path(tmp_path):
+    import hashlib
+    from archcoach.learning import source_walkthroughs
+    from archcoach.db import Store
+    settings, ids = seed_profile(tmp_path); store = Store(settings.db_path)
+    review = store.get_review(ids['before']); snapshot = store.get_snapshot(review['snapshot_id'])
+    text = 'def inner(value):\n    if value:\n        save(value)\ndef run(flag):\n    if flag:\n        inner(flag)\n'
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    blob = settings.blob_dir / digest[:2] / digest; blob.parent.mkdir(exist_ok=True); blob.write_text(text)
+    snapshot['manifest'] = [{'path': 'branches.py', 'sha256': digest, 'lines': 6}]
+    result = source_walkthroughs(settings, snapshot, review)
+    outline = next(o for o in result['outlines'] if o['name'] == 'branches.py · run')
+    save = next(s for s in outline['steps'] if s['title'] == 'Call site' and 'calls save' in s['explanation'])
+    assert 'If flag is true' in save['explanation'] and 'If value is true' in save['explanation']
+    assert save['example']['line'] == 3 and save['inferred']
+    text = 'export function inner(value: boolean) { if(value) save(value); }\nexport function run(flag: boolean) { if(flag) inner(flag); }\n'
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    blob = settings.blob_dir / digest[:2] / digest; blob.parent.mkdir(exist_ok=True); blob.write_text(text)
+    snapshot['manifest'] = [{'path': 'branches.ts', 'sha256': digest, 'lines': 2}]
+    result = source_walkthroughs(settings, snapshot, review)
+    outline = next(o for o in result['outlines'] if o['name'] == 'branches.ts · run')
+    save = next(s for s in outline['steps'] if s['title'] == 'Call' and 'Calls save' in s['explanation'])
+    assert 'If flag is true' in save['explanation'] and 'If value is true' in save['explanation']
+    assert save['example']['line'] == 1 and save['inferred']
 
 
 def test_map_arrows_have_keyboard_selection_and_saved_evidence(tmp_path, monkeypatch):

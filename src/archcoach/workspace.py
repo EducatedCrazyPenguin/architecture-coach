@@ -97,6 +97,8 @@ def resolve_selection(snapshot, review, selection, walkthrough=None):
     elif kind == 'source':
         label = data['path']; refs = [{'path': label, 'line': data['line'], 'end_line': data.get('end_line')}]
     elif kind == 'walkthrough':
+        if data.get('outline_version') != (walkthrough or {}).get('format_version'):
+            raise ValueError('Reading outline changed; select the saved step again. Your draft is preserved.')
         item = next((i for i in (walkthrough or {}).get('outlines', []) if i['id'] == identifier), None)
         step = data.get('step', 0)
         if item is None or step < 0 or step >= len(item['steps']): raise ValueError('Walkthrough step is unavailable')

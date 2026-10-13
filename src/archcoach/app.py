@@ -283,7 +283,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     def saved_walkthrough(review, snapshot, selected_path=None):
         if selected_path: return selected_walkthrough(review['id'], selected_path)
-        saved = store.get_learning_walkthrough(review['id'], 2)
+        saved = store.get_learning_walkthrough(review['id'], 3)
         return saved if saved is not None else store.save_learning_walkthrough(review['id'], source_walkthroughs(settings, snapshot, review))
 
     @lru_cache(maxsize=8)

@@ -124,13 +124,31 @@ def _python_walkthroughs(settings, snapshot, review, selected_path=None, cancell
         if include and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
             return
         node._reading_branch = branch
+        if isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values):
+                if key is not None:
+                    yield from body_nodes(key, branch, True)
+                yield from body_nodes(value, branch, True)
+            yield node
+            return
+        if isinstance(node, ast.BoolOp):
+            for index, value in enumerate(node.values):
+                condition = 'earlier parts count as true' if isinstance(node.op, ast.And) else 'earlier parts count as false'
+                label = f'{branch}; If {condition}' if branch else f'If {condition}'
+                yield from body_nodes(value, label if index else branch, True)
+            yield node
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            notes.append('Comprehension or generator expression omitted from call ordering; iteration and deferred execution need separate inspection.')
+            return
         if include and isinstance(node, (ast.If, ast.IfExp)):
             yield from body_nodes(node.test, branch, True)
             yield node
             condition = ast.unparse(node.test)[:100]
             for statements, label in ((node.body, 'true'), (node.orelse, 'false')):
                 for statement in statements if isinstance(statements, list) else [statements]:
-                    yield from body_nodes(statement, f'If {condition} is {label}', True)
+                    alternative = f'{branch}; If {condition} is {label}' if branch else f'If {condition} is {label}'
+                    yield from body_nodes(statement, alternative, True)
                     if isinstance(statement, (ast.Raise, ast.Return)): break
             return
         if isinstance(node, ast.ExceptHandler):
@@ -182,17 +200,18 @@ def _python_walkthroughs(settings, snapshot, review, selected_path=None, cancell
                     steps.append({'title': title, 'explanation': explanation, 'inferred': inferred,
                                   'component_id': owners.get(node_path), 'from_component_id': from_component, 'example': example})
 
-            def follow(fn, fn_path, depth=0, from_component=None):
+            def follow(fn, fn_path, depth=0, from_component=None, branch=''):
                 key = (fn_path, fn.name)
                 if key in visited or depth > 2 or len(steps) >= 30:
                     return
                 visited.add(key)
+                fn._reading_branch = branch
                 args = [arg.arg for arg in [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]]
                 args.extend(arg.arg for arg in (fn.args.vararg, fn.args.kwarg) if arg is not None)
                 add(fn, fn_path, f'Boundary: {fn.name}', f'Declared parameters: {", ".join(args) or "none"}. Types and actual caller values are unconfirmed.', depth > 0, from_component)
                 nodes = []
                 for statement in fn.body:
-                    nodes.extend(body_nodes(statement, include=True))
+                    nodes.extend(body_nodes(statement, branch, include=True))
                     if isinstance(statement, (ast.Raise, ast.Return)): break
                 shadowed = set(args) | module_writes[fn_path] | {n.id for n in nodes if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
                 interesting = [n for n in nodes if isinstance(n, (ast.Call, ast.If, ast.IfExp, ast.Raise, ast.ExceptHandler, ast.Return, ast.Assign, ast.AugAssign))]
@@ -211,7 +230,7 @@ def _python_walkthroughs(settings, snapshot, review, selected_path=None, cancell
                         detail = 'A unique captured declaration is linked below; runtime binding and branch remain inferred.' if target_fn else 'Target unresolved (external, dynamic, shadowed or outside the parsing budget).'
                         add(node, fn_path, 'Call site', f'Expression calls {expression}. {detail}', True)
                         if target_fn:
-                            follow(target_fn, target[0], depth + 1, owners.get(fn_path))
+                            follow(target_fn, target[0], depth + 1, owners.get(fn_path), getattr(node, '_reading_branch', ''))
                     elif isinstance(node, (ast.If, ast.IfExp)):
                         add(node, fn_path, 'Decision branch', 'Read the condition and both alternatives. Which branch runs depends on input.', True)
                     elif isinstance(node, (ast.Raise, ast.ExceptHandler)):
@@ -251,7 +270,7 @@ def _python_walkthroughs(settings, snapshot, review, selected_path=None, cancell
 
 
 def source_walkthroughs(settings, snapshot, review, selected_path=None, cancelled=lambda: False):
-    """Version two adds compiler-backed outlines without rewriting captured analysis."""
+    """Versioned reading outlines never rewrite captured analysis or earlier derived views."""
     from .workspace import source_role
     from .analyze import _typescript_analysis
     supported = [f for f in snapshot['manifest'] if f['path'].lower().endswith(('.py', '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs'))]
@@ -261,7 +280,7 @@ def source_walkthroughs(settings, snapshot, review, selected_path=None, cancelle
     chosen = supported[:24]
     bounded = {**snapshot, 'manifest': chosen}
     result = _python_walkthroughs(settings, bounded, review, selected_path, cancelled)
-    result['format_version'] = 2
+    result['format_version'] = 3
     result['notes'] = [n for n in result['notes'] if 'JavaScript/TypeScript' not in n and 'No supported Python' not in n]
     if len(supported) > 24: result['notes'].append(f'{len(supported)-24} files outside the shared 24-file parsing budget.')
     typed_files = [f for f in chosen if not f['path'].lower().endswith('.py')]
@@ -270,7 +289,7 @@ def source_walkthroughs(settings, snapshot, review, selected_path=None, cancelle
         rows, error = _typescript_analysis(settings, [*typed_files, *configs], cancelled)
         if error: result['notes'].append(error)
         membership = {f['path']: [c['id'] for c in review['architecture']['components'] if f['path'] in (c.get('source_paths') or [r['path'] for r in c.get('sources', [])])] for f in chosen}
-        def steps_for(path, outline, depth=0, visited=None):
+        def steps_for(path, outline, depth=0, visited=None, parent_branch=''):
             visited = set() if visited is None else set(visited)
             key = (path, outline['name'])
             if key in visited or depth > 2: return []
@@ -279,11 +298,13 @@ def source_walkthroughs(settings, snapshot, review, selected_path=None, cancelle
                 example = saved_excerpt(settings, snapshot, {'path': path, 'line': step['line'], 'end_line': step['end_line']})
                 if not example: continue
                 ids = membership.get(path, [])
-                steps.append({**step, 'example': example, 'component_id': ids[0] if len(ids)==1 else None, 'from_component_id':None})
+                explanation = f"{parent_branch}; {step['explanation']}" if parent_branch else step['explanation']
+                steps.append({**step, 'explanation': explanation, 'example': example, 'component_id': ids[0] if len(ids)==1 else None, 'from_component_id':None})
                 target = step.get('target')
                 if target and target['path'] in rows:
                     matches = [f for f in rows[target['path']].get('outlines', []) if f['name']==target['name'] and (target['path']==path or f['exported'])]
-                    if len(matches)==1: steps.extend(steps_for(target['path'], matches[0], depth+1, visited))
+                    branch = '; '.join(filter(None, (parent_branch, step.get('branch'))))
+                    if len(matches)==1: steps.extend(steps_for(target['path'], matches[0], depth+1, visited, branch))
                 if len(steps)>=30: break
             return steps[:30]
         for path, row in rows.items():

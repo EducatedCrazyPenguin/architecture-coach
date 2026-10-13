@@ -26,7 +26,7 @@ class ReviewCancelled(RuntimeError):
     pass
 
 
-ANALYSIS_FORMAT_VERSION = 4
+ANALYSIS_FORMAT_VERSION = 5
 REVIEW_FORMAT_VERSION = 9
 
 

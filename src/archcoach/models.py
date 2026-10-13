@@ -247,6 +247,7 @@ class LearningSelection(BaseModel):
     line: int | None = Field(default=None, ge=1)
     end_line: int | None = Field(default=None, ge=1)
     step: int | None = Field(default=None, ge=0, le=29)
+    outline_version: int | None = Field(default=None, ge=1)
 
     @model_validator(mode='after')
     def subject_is_complete(self):

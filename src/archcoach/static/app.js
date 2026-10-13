@@ -30,7 +30,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const outline = trace.outlines[feature], current = outline.steps[step];
       document.getElementById('feature-entry').textContent = outline.entry || 'Entry mechanism unconfirmed';
       const askStep=document.getElementById('ask-step');
-      askStep.onclick=()=>{openInstructor();const area=instructor.querySelector('.chat-form textarea');if(area.value.trim()){toast('Your draft is preserved. Send or clear it before changing context.');return;}setSelection({kind:'walkthrough',id:outline.id,step});area.value='Explain this saved step in simple language: what goes in, what work it does, and what could stop it.';saveDraft();};
+      askStep.onclick=()=>{openInstructor();const area=instructor.querySelector('.chat-form textarea');if(area.value.trim()){toast('Your draft is preserved. Send or clear it before changing context.');return;}setSelection({kind:'walkthrough',id:outline.id,step,outline_version:trace.format_version});area.value='Explain this saved step in simple language: what goes in, what work it does, and what could stop it.';saveDraft();};
       document.getElementById("step-title").textContent = current.title;
       document.getElementById("step-explanation").textContent = `${current.explanation}${current.inferred ? " · Runtime interpretation is inferred." : " · Declared in captured source."}`;
       document.getElementById("step-code").textContent = current.example.code;
@@ -169,11 +169,12 @@ document.addEventListener("DOMContentLoaded", () => {
     area.value = button.dataset.question;saveDraft();
   }));
   function setSelection(selection) {
+    const legacy=selection?.kind === 'walkthrough' && selection.outline_version !== 3;
     const field = instructor?.querySelector('[name="selection"]');
     if (field) field.value = selection ? JSON.stringify(selection) : "";
     const label = document.getElementById("instructor-selection-label");
-    if(label) label.textContent = selection ? `Selected ${selection.kind}: ${selection.id || selection.path}` : "Whole saved review";
-    saveSession({selection});
+    if(label) label.textContent = selection ? `Selected ${selection.kind}: ${selection.id || selection.path}${legacy ? ' · Earlier reading format: select this step again' : ''}` : "Whole saved review";
+    if(!legacy) saveSession({selection});
   }
   document.querySelectorAll('.instructor-action').forEach(button=>button.addEventListener('click',()=>{openInstructor();const area=instructor.querySelector('.chat-form textarea');if(area.value.trim()){toast('Your draft is preserved. Send or clear it before choosing another explanation.');return;}instructor.querySelector('[name="mode"]').value=button.dataset.mode;area.value=button.dataset.prompt;saveDraft();}));
   document.getElementById("clear-instructor-selection")?.addEventListener("click", () => setSelection(null));
@@ -216,7 +217,12 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   const chatForm = document.querySelector(".chat-form");
   function saveDraft() {
-    if(chatForm) return saveSession({draft:chatForm.querySelector('textarea').value,mode:chatForm.elements.mode.value,question_id:chatForm.elements.question_id.value || null,selection:chatForm.elements.selection.value ? JSON.parse(chatForm.elements.selection.value):null});
+    if(chatForm) {
+      const selection=chatForm.elements.selection.value ? JSON.parse(chatForm.elements.selection.value):null;
+      const changes={draft:chatForm.querySelector('textarea').value,mode:chatForm.elements.mode.value,question_id:chatForm.elements.question_id.value || null};
+      if(selection?.kind !== 'walkthrough' || selection.outline_version === 3) changes.selection=selection;
+      return saveSession(changes);
+    }
     return Promise.resolve();
   }
   if (chatForm) {
@@ -275,6 +281,10 @@ document.addEventListener("DOMContentLoaded", () => {
     chatForm.addEventListener("submit", async event => {
       event.preventDefault();
       if (activeJob || submit.disabled) return;
+      const selection=chatForm.elements.selection.value ? JSON.parse(chatForm.elements.selection.value):null;
+      if(selection?.kind === 'walkthrough' && selection.outline_version !== 3) {
+        progress.hidden=false;progress.textContent='Reading outline changed. Select the saved step again or clear context; your draft is preserved.';return;
+      }
       const draft = area.value;
       submit.disabled = true; progress.hidden = false;
       progress.textContent = "Queuing your question…";

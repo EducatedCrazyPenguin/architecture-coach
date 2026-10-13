@@ -134,14 +134,25 @@ for (let index = 0; index < absoluteFiles.length; index += 1) {
       ts.forEachChild(node,collectBindings);
     }
     collectBindings(fn.node);
-    function step(node,title,explanation,branch,extra={}) {if(steps.length<30)steps.push({title,explanation:branch ? `${branch}. ${explanation}`:explanation,...location(node),inferred:true,...extra});}
+    function step(node,title,explanation,branch,extra={}) {if(steps.length<30)steps.push({title,explanation:branch ? `${branch}. ${explanation}`:explanation,branch,...location(node),inferred:true,...extra});}
     function read(node,branch='') {
       if(!node || steps.length>=30) return;
       if(ts.isFunctionLike(node) && node !== fn.node) return;
-      if(ts.isIfStatement(node)) {
-        step(node,'Decision',`Read the condition ${literal(node.expression)}. Only the selected branch applies.`,branch);
-        read(node.thenStatement,`If ${literal(node.expression)} is true`);
-        read(node.elseStatement,`If ${literal(node.expression)} is false`); return;
+      if(ts.isIfStatement(node) || ts.isConditionalExpression(node)) {
+        const isIf = ts.isIfStatement(node);
+        const condition = isIf ? node.expression : node.condition;
+        const prefix = branch ? `${branch}; ` : '';
+        read(condition,branch);
+        step(node,'Decision',`Read the condition ${literal(condition)}. Only the selected branch applies.`,branch);
+        read(isIf ? node.thenStatement : node.whenTrue,`${prefix}If ${literal(condition)} is true`);
+        read(isIf ? node.elseStatement : node.whenFalse,`${prefix}If ${literal(condition)} is false`); return;
+      }
+      if(ts.isBinaryExpression(node) && [ts.SyntaxKind.AmpersandAmpersandToken,ts.SyntaxKind.BarBarToken,ts.SyntaxKind.QuestionQuestionToken].includes(node.operatorToken.kind)) {
+        read(node.left,branch);
+        const condition = node.operatorToken.kind===ts.SyntaxKind.AmpersandAmpersandToken ? 'counts as true'
+          : node.operatorToken.kind===ts.SyntaxKind.BarBarToken ? 'counts as false' : 'is null or undefined (a missing value)';
+        const prefix = branch ? `${branch}; ` : '';
+        read(node.right,`${prefix}If earlier value ${condition}`); return;
       }
       if(ts.isThrowStatement(node)) {read(node.expression,branch);step(node,'Possible failure','This statement throws. Later statements in this block are not on this failure path.',branch);return;}
       if(ts.isReturnStatement(node)) {read(node.expression,branch);step(node,'Output','This expression is returned if this point is reached; its value has not been measured.',branch);return;}
