@@ -84,6 +84,12 @@ After the reported attempts and corrections, the user's instruction to continue 
 
 Final code checks: **196 unfiltered pytest tests passed**, zero skips/deselections (51.11 seconds), including the pinned renderer; **six headless browser scenarios passed** (1.0 minute); **9/9 strict OpenSpec documents passed**. Focused guidance/history/learning checks passed 40/40. The wording-guard mutation check ran only in an isolated process: six regressions detected the inverted guard, source hashes stayed unchanged, and original-source tests passed. Dependency, JavaScript syntax and diff checks passed; existing deprecation warnings remain.
 
+The learner correctly identified the storage responsibility in one code-free ownership question. This is directly observed partial feedback, not a completed session or measured comprehension/retention improvement. A one-sentence explanation of why the greeting part should retain the storage boundary is pending; raw responses remain private. The complete orientation, walkthrough, quiz, explain-back, later revision and change lesson still require observation.
+
 The offline editable upgrade completed without dependencies or network installation. Installed package 0.1.0 and Python 3.12.10 resolve current source, quiz policy, guidance, template, launcher and local HTMX assets from this checkout. No matching shortcut was found in standard user/public desktop locations; none was created. The browser-check port was released. Production data was not opened or migrated; no visible daily-launch check occurred.
 
 **Progress: 17/18 verified; L17 remains open. Next:** observe the beginner flow one plain-language idea at a time, followed by explain-back/revision/change reasoning, and obtain a separately requested bounded check of the final lesson guidance. Do not archive these changes or merge a fully verified educational release claim into main while this evidence is absent.
+
+### Published follow-up
+
+Application commit [`322e56df688b7d0ce7732a531547ca5b97ea3d4b`](https://github.com/EducatedCrazyPenguin/architecture-coach/commit/322e56df688b7d0ce7732a531547ca5b97ea3d4b) is pushed on `codex/repository-learning`; local and remote branch hashes agreed. Exact-commit [Windows release checks](https://github.com/EducatedCrazyPenguin/architecture-coach/actions/runs/38349150298) completed successfully. One public CI status read timed out; the single shorter-timeout repeat succeeded. No code checks were bypassed. This final publication note changes documentation only; main remains unchanged and L17 remains open.
