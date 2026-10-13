@@ -182,3 +182,22 @@ The follow-up application commit is `322e56d`, with successful exact-commit [Win
 **13 October actual-screen checkpoint — Evidence: 2/3:** a later bounded real Bonsai review completed, but still produced an unsupported CLI label, ambiguous exception reasoning and inaccurate whitespace. Shared guidance was corrected without another automatic inference. Architecture/source-summary prompt changes now force regeneration while preserving saved learning history; generated illustrations warn about omitted steps in the screen and export. **198 regressions, six headless browser scenarios and nine strict documents passed**. The installed editable source and assets resolve this change. Source checkpoint `defaf0c` is pushed, with successful [exact-commit Windows CI](https://github.com/EducatedCrazyPenguin/architecture-coach/actions/runs/38364951911).
 
 The user chose the app's screens. Prepared a separate, thirty-minute, no-browser practice session with real Archify diagrams, two saved versions, manually checked plain-language lessons and ten offline MCQs. It is clearly labelled limited/manual, has no live model access, and leaves daily data untouched. No learner response was fabricated. **17/18 remains verified. Next:** obtain screen feedback and complete the walkthrough, reasoning, explain-back, later recall and change exercise; separately authorised final-guidance provider verification remains pending. See the shared verification record for operational evidence and actual publication state.
+
+
+## Connected workspace implementation (13 October 2026)
+
+This additive N01–N28 roadmap is tracked in focused OpenSpec changes, not a new ledger:
+
+- [Shared review/navigation](../openspec/changes/connect-review-learning-workspace/tasks.md)
+- [Saved map drill-down](../openspec/changes/add-saved-map-drilldown/tasks.md)
+- [Python/TypeScript reading](../openspec/changes/extend-feature-reading-outlines/tasks.md)
+- [Contextual instructor](../openspec/changes/ground-contextual-instructor/tasks.md)
+- [Grounded quiz practice](../openspec/changes/improve-grounded-quiz-practice/tasks.md)
+- [Resumable sessions](../openspec/changes/add-resumable-learning-sessions/tasks.md)
+- [Acceptance and publication](../openspec/changes/verify-connected-learning-release/tasks.md)
+
+Use `pnpm spec:progress` for checked/total, remaining, awaiting-verification and explicitly blocked counts. The prior 17/18 record remains historical; L17 owns real teaching and beginner acceptance for both roadmaps. N15/N20 have implemented controls/rubrics but remain unchecked pending final feedback quality. The bounded local sample exposed an inaccurate quiz distractor and missing follow-up; the new structural guard has synthetic evidence. N27 remains open for final real teaching inspection, beginner observation and later recall. Model loading is deferred while the learner renders. N28 cannot claim a finished release or merge while that gate is open. Read the linked verification notes for actual tests, installation and publication evidence.
+
+**Evidence: 2/3 — synthetic regression, headless browser and isolated installed-entry checks directly support the implementation; reliable real teaching and learner effectiveness remain unverified.** Production data was not opened or migrated and no visible daily app was launched.
+
+**14 October checkpoint:** source `a19163d` passes 226 unfiltered regressions and nine headless browser scenarios. Strict OpenSpec validates sixteen documents. The earlier `4ab6c97` checkpoint has successful Windows CI; exact final publication is tracked in the shared verification. Progress is **24/28 verified, two awaiting checks, two blocked, four remaining**. The inaccurate sample question is paused privately without changing its saved bytes. No further model was loaded after the instruction to leave rendering resources available.

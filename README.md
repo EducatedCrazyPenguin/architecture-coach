@@ -25,10 +25,10 @@ The app binds only to `127.0.0.1:8765`. Use **Exit app** in the sidebar to stop 
 ## What a review contains
 
 - A source-backed summary and main execution path.
-- An interactive Archify architecture diagram.
+- A connected learning map with saved import evidence, file-role filters and bounded internal-file views; the original Archify diagram remains an export.
 - Stable changes from the last successful review on the same Git branch.
 - Up to five practical findings with evidence, impact, a small improvement, and tradeoffs.
-- A ten-question repository quiz with four choices, source evidence, saved progress, and an explanation for every selected answer.
+- Zero to ten distinct repository questions with saved hints, source evidence, first attempts, retries, a **Not sure** option and offline explanations. Fewer questions means the saved evidence did not support a full set.
 - A conversation tied to that immutable review snapshot.
 - When a project has standard OpenSpec specifications, a separate requirements view with tentative, cited implementation assessments.
 
@@ -40,17 +40,23 @@ The app uses the saved Codex CLI login and runs review sessions read-only. On Wi
 
 Choose **Explain this simply** if you are new to reading code. It opens an instructor draft in simpler mode; it does not send a request or replace an unsent question. The guidance starts with the part's job and one input/output example in plain language, defines unfamiliar terms, and asks one short question. Lessons show their explanation before the optional **Show the saved code** disclosure. New reviews use the updated teaching guidance; old saved reviews stay unchanged.
 
-Choose **Start learning this repo**, read the lessons beside the quiz and expand **Read the captured example**. **Follow a feature** steps through supported local Python declarations with saved code and a synchronized component map. These are bounded static reading outlines, not observed runtime traces; unsupported languages, dynamic calls and unexecuted assertions remain labelled.
+Choose **Start learning this repo** for a resumable short session, or explore freely using **Overview**, **Map**, **Follow a feature**, **Learn**, **Quiz**, and **Changes**. **Ask instructor** stays available in every saved learning view; on a narrow screen it opens a keyboard-accessible drawer. Expand the map to inspect a component’s files and internal imports, or choose a saved source range to prepare a contextual question. Opening a saved view never starts inference.
+
+**Follow a feature** covers supported Python and JavaScript/TypeScript declarations, named arrow functions and directly bound JSX handlers. The selected step highlights its saved excerpt and component. Each outline is a qualified reading sequence, not an observed runtime trace: branches, external calls, ambiguous bindings, missing configuration and unexecuted tests remain labelled. Defaults cap parsing at twenty-four saved files, twelve outlines, thirty steps and depth two; select a saved file to prioritise a narrower view.
+
+Map counts use validated saved import edges, including imports hidden inside component groups. A zero does not prove runtime independence. Detail views cap the drawing at forty files and eighty arrows, disclose omissions and retain full saved per-file counts. Documentation, tests and tooling are separate from application source; uncertain roles remain unknown.
 
 **My learning** keeps first attempts, retries, due recall questions and private notes across repositories. Revision uses saved questions with providers off. Wrong answers return after one day, initial correct answers after three days; delayed correct recall increases the interval up to fourteen days. Same-day retries do not increase recall streaks. A correct answer is practice, not a mastery certificate.
 
 New AI quizzes balance correct answer positions locally while keeping each explanation with its choice. Position-dependent wording such as **all of the above** is rejected through the bounded repair path. Existing saved options and attempts remain unchanged; balanced presentation does not prove an answer is factually correct.
 
-The instructor offers a small hint, simpler/deeper explanation, feedback on your explanation and constrained design practice through the selected provider. Offline reading hints and saved answers require no model. Explain-back uses correct points, missing reasoning and one next question; design practice allows multiple defensible alternatives. Unsent drafts survive failures and cancellation.
+The instructor offers a small hint, simpler/deeper explanation, feedback on your explanation and constrained design practice through the selected provider. Offline reading hints and saved answers require no model. Explain-back requires correct points, missing reasoning and one follow-up question; incomplete output gets one repair, then a visible failed answer. This format does not establish factual correctness. Design practice allows multiple defensible alternatives. Unsent drafts, selected context, question position and the session’s next step are saved locally. Normal navigation and **Exit app** wait for draft saves; browser-close saving is best effort, so a crashed browser or disconnected server can still lose the latest keystrokes. Failures and cancellation keep the draft.
+
+Use **This seems wrong** to record a private correction issue. Flagged questions are paused for future practice while historical attempts remain intact. The instructor’s **Private corrections** panel can mark an issue reviewed; this does not rewrite saved content or establish that it is correct. Generate a new review for corrected teaching material. The glossary connects basic architecture words to separately cited saved examples.
 
 In a comparison, **Learn from this change** pairs two saved excerpts and asks you to predict possible affected callers. **Compare a concept across saved repos** keeps each origin separate. **Follow this improvement through** records user reports against a later saved review; planning files or observed source edits never prove implementation or passing tests.
 
-**Evidence: 2/3 — synthetic, headless and quiet installed-launcher checks passed; an authorised real Bonsai sample exercised teaching but exposed accuracy limitations. Learner comprehension and reliable teaching acceptance remain pending.** Implementation checks and pending acceptance are tracked in [the learning roadmap](docs/FUTURE_UPDATES.md). Existing snapshots and artifacts stay unchanged; private learning records use transactional SQLite migrations with pre-migration recovery backups.
+**Evidence: 2/3 — current changes have synthetic regression and headless browser evidence. A bounded Bonsai sample correctly explained several saved facts but exposed an inaccurate quiz explanation and omitted follow-up question. The structural feedback fix is tested with synthetic providers; final real teaching, beginner observation and later recall remain open. Installed verification is recorded separately in the relevant change notes.** Implementation checks and pending acceptance are tracked in [the learning roadmap](docs/FUTURE_UPDATES.md). Existing snapshots and artifacts stay unchanged; private learning records use transactional SQLite migrations with pre-migration recovery backups.
 
 ## Storage and privacy
 
@@ -67,7 +73,7 @@ Archify is vendored at commit `a07fa1d5b2a10cbea110c5a2be2817397a301cdc` under `
 - **Git inspection:** Architecture Coach checks Git ignore rules before capture. It discovers Git from PATH, normal Git for Windows locations, and Codex's bundled runtime. If none is available for a Git repository, install Git for Windows and restart the app.
 - **Usage limits and timeouts:** the app pauses scheduled retries after these failures. Retry manually after the limit resets, or adjust the per-call and per-review limits in Settings.
 - **Interrupted work:** reopening the launcher marks work abandoned by the prior owning worker and queues one catch-up review when a project is overdue. Completed reviews remain available after a failed attempt.
-- **Database migration:** startup applies transactional migrations automatically. Before changing an existing database, it copies the prior file to `%LOCALAPPDATA%\ArchCoach\backups`.
+- **Database migration:** startup applies transactional migrations automatically. Before changing an existing database, it writes a consistent SQLite recovery backup, including committed WAL data, to `%LOCALAPPDATA%\ArchCoach\backups`.
 - **Backup:** close the app, then copy the full `%LOCALAPPDATA%\ArchCoach` folder. Restore that folder while the app is stopped.
 - **Repair installation:** close the app and run `install.cmd` again. It reuses the checkout and isolated environment and stops with a clear error if Python 3.12, pnpm, Node, Archify, or local assets are unavailable.
 

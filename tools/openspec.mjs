@@ -13,7 +13,8 @@ if (args[0] === "progress") {
     const done = (tasks.match(/^- \[x\] /gm) || []).length;
     const remaining = (tasks.match(/^- \[ \] /gm) || []).length;
     const blocked = (tasks.match(/^- \[ \] .*\bBLOCKED:/gm) || []).length;
-    console.log(`${entry.name}: ${done}/${done + remaining} verified; ${remaining} remaining; ${blocked} blocked`);
+    const awaiting = (tasks.match(/^- \[ \] .*\bAWAITING:/gm) || []).length;
+    console.log(`${entry.name}: ${done}/${done + remaining} verified; ${remaining} remaining; ${awaiting} awaiting verification; ${blocked} blocked`);
   }
 } else {
   const result = spawnSync(process.execPath, [join(root, "node_modules", "@fission-ai", "openspec", "bin", "openspec.js"), ...args], {
