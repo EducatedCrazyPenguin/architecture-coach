@@ -2,7 +2,7 @@
 
 **Evidence: 2/3 — synthetic behavior and the isolated installed CLI are directly checked. A bounded real provider sample was inspected and exposed teaching defects; final model accuracy, beginner comprehension and the daily-use visible launcher remain unfinished.**
 
-Starting application commit: `582e3fa`. Latest tested application checkpoint: `49b80d72b97a69c2dde12847feacf1eb3f1405cd`, preceded by focused saved-analysis, practice-persistence, connected-interface, keyboard-map and structured-feedback commits. Existing L17 remains open; historical 17/18 progress is not reset. Task counts are not time or effort estimates.
+Starting application commit: `582e3fa`. Latest fully tested application checkpoint: `7ee5adf843cca87f65e514d393cdb8cdf2fda671`, following the earlier saved-analysis, practice-persistence, connected-interface, keyboard-map, structured-feedback and source-reading commits. Existing L17 remains open; historical progress below is retained. Task counts are not time or effort estimates.
 
 ## Implementation and completion evidence
 
@@ -10,7 +10,7 @@ N25: synthetic fixtures cover packages, TypeScript/React, nested configuration, 
 
 Sources: [workspace regression cases](../../../tests/test_connected_workspace.py), [browser journeys](../../../browser-tests/learning.spec.ts), [saved analysis/teaching](../../../src/archcoach/learning.py), [review services](../../../src/archcoach/review.py), [local API](../../../src/archcoach/app.py), [persistence](../../../src/archcoach/db.py).
 
-## Actual checks
+## Earlier checks — 14 October
 
 - Latest unfiltered pytest: **234 passed**, no skips/deselections, 72.60 seconds; synthetic fixtures and the pinned Archify renderer, with no real inference in the regression suite. The earlier structured-feedback checkpoint passed 226 cases in 60.41 seconds.
 - Earlier focused workspace/teaching/diagram-export checks: 54 passed; review/export/workspace checks: 44 passed. The feedback-focused pass had 49 cases before the final claim-guard test; that guard and migration backup/upgrade checks passed in the final full suite.
@@ -54,3 +54,13 @@ The feedback-focused attempt in sandbox stopped at the isolated HTTP harness. A 
 Typed citations establish locations, not reasoning correctness. Parser coverage is bounded and limited to supported declarations; dynamic dispatch, external configuration and cross-language runtime order remain uncertain. Browser-close saving cannot guarantee the final keystrokes after a crash or disconnected server. Private production data was not opened/migrated; target source, old review artifacts, conversations and attempts are preserved. The only real model load was the explicitly authorised bounded sample before the no-model instruction. No visible app, model download, cloud fallback or paid call occurred.
 
 Progress: **24/28 verified; two awaiting verification (N15, N20), two blocked (N27, N28); four remaining.** The tested application checkpoint is pushed on `codex/repository-learning`, with successful exact-source Windows CI recorded above. While rendering resources are reserved, do not load models. Once the learner explicitly permits it, inspect final provider feedback and complete the full beginner screen session and later recall/change exercise. Keep N15/N20 and L17/N27 open; N28 cannot become a completed release until acceptance passes. Do not archive or merge a completed teaching release claim into main.
+
+## Latest checkpoint and handoff — 17 October 2026
+
+**Evidence: 2/3 — published teaching-boundary behavior passed synthetic/runtime and Windows checks; the separate draft follow-up failed its full browser gate and real teaching acceptance remains open.**
+
+Source `7ee5adf843cca87f65e514d393cdb8cdf2fda671` corrects quoted-source range matching, Windows line endings and common formatting of narrow source-only claims. It passed **248 local regressions** (89.74 seconds), **11 headless browser scenarios** (1.4 minutes), sixteen strict specification checks and the isolated installed CLI lifecycle with unchanged synthetic source and zero inference jobs. A quotation-condition mutation was detected, restored exactly and checked again. [Exact Windows CI](https://github.com/EducatedCrazyPenguin/architecture-coach/actions/runs/38951103551) passed 248 pytest cases (74.10 seconds), eleven browser scenarios (1.1 minutes) and strict specifications. No model was loaded, no private daily profile migrated, and no main merge or completed release was claimed.
+
+The subsequent older-position/draft correction passed 251 regressions and its isolated browser check but failed the full browser gate. It is preserved as a local reapplicable patch, and the application/test checkout was restored to `7ee5adf`. N21 is reopened; [its verification note](../add-resumable-learning-sessions/verification.md) records exact failures, patch identity and the next diagnostic action. Later documentation commits change no application/testing bytes. Browser retries stopped after the repeated failure; the owned servers shut down. The account allowance was not exhausted; the remaining work hit a verification blocker.
+
+**Current progress: 23/28 verified; three awaiting (N15, N20, N21), two blocked (N27, N28); five remaining.** This supersedes the earlier 24/28 checkpoint for current release readiness. Restore reliable full-browser draft verification first; then finish authorized real teaching inspection and learner screen/recall acceptance under L17. Keep models unloaded while the current rendering instruction applies. No required gate is silently skipped.
