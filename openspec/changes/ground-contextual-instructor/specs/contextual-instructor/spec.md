@@ -28,4 +28,12 @@ New answers SHALL reject invalid citations and deterministically detectable unsu
 - **WHEN** A learner flags a saved question
 - **THEN** future practice excludes it until explicitly resolved and old attempts remain available
 
+#### Scenario: Saved quotation must match its cited range
+- **WHEN** a new instructor answer labels a fenced block as saved or captured code
+- **THEN** its text must occur within a cited saved range after line-ending normalization, including formatted labels; a wrong range gets at most one repair before a visible failure
+
+#### Scenario: Explanations distinguish formatted claims from examples
+- **WHEN** an answer uses headings, lists, emphasis or fenced examples
+- **THEN** the narrow source-only claim checks apply to prose despite formatting, while a hypothetical fenced log is not treated as an observed test result
+
 Evidence: 2/3 — approved intent and current implementation guide these scenarios; verification is recorded separately and real learning effectiveness is not established.

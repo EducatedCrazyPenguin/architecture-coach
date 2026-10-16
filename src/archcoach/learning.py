@@ -57,23 +57,53 @@ def practice_context(settings, snapshot, review, mode, question_id, attempt=None
     return PRACTICE_GUIDANCE[mode], context
 
 
+def _teaching_blocks(answer):
+    """Separate fenced examples from prose for the narrow teaching checks."""
+    import re
+    prose, quotes, block = [], [], []
+    fence = ''; saved = False; previous = ''
+    for line in answer.splitlines():
+        marker = re.match(r'^[ \t]{0,3}(`{3,}|~{3,})(.*)$', line)
+        if fence:
+            if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence) and not marker[2].strip():
+                if saved: quotes.append('\n'.join(block))
+                fence = ''; block = []; previous = ''
+            else:
+                block.append(line)
+            continue
+        if marker:
+            fence = marker[1]
+            saved = bool(re.fullmatch(r'(?:saved|captured) code:', previous, re.I))
+            continue
+        plain = re.sub(r'^\s*(?:>\s*)*(?:(?:[-+*]|\d+[.)]|#{1,6})\s+)?', '', line)
+        plain = re.sub(r'[`*_]', '', plain).strip()
+        prose.append(plain)
+        if plain: previous = plain
+    if fence and saved:
+        raise ValueError('A saved quotation must close its code fence')
+    return '\n'.join(prose), quotes
+
+
 def check_teaching_claims(settings, snapshot, response):
     """Narrow deterministic checks, not a general correctness or runtime verifier."""
     import re
     import tomllib
-    if re.search(r'(?im)^\s*(?:all|the|these) tests (?:passed|have passed|are passing)\b', response.answer):
+    prose, quotes = _teaching_blocks(response.answer)
+    if re.search(r'(?im)^\s*(?:all|the|these) tests (?:passed|have passed|are passing)\b', prose):
         raise ValueError('A source-only instructor cannot claim tests passed')
     entries = {f['path']:f for f in snapshot['manifest']}
     contents = {ref.path:read_blob(settings,entries[ref.path]['sha256']).decode('utf-8',errors='replace') for ref in response.citations}
-    for quote in re.findall(r'(?im)^(?:saved|captured) code:\s*\n```[^\n]*\n(.*?)\n```',response.answer,re.S):
-        if not any(quote.strip() in text for text in contents.values()):
-            raise ValueError('An alleged saved quotation differs from its cited source; label alternatives hypothetical')
+    cited_ranges = ['\n'.join(contents[ref.path].splitlines()[ref.line - 1:ref.end_line or ref.line])
+                    for ref in response.citations]
+    for quote in quotes:
+        if not any('\n'.join(quote.strip().splitlines()) in text for text in cited_ranges):
+            raise ValueError('An alleged saved quotation differs from its cited line range; label alternatives hypothetical')
     trees = {}
     for path,text in contents.items():
         if not path.endswith('.py') or len(text)>100_000: continue
         try: trees[path]=ast.parse(text)
         except (SyntaxError,ValueError,RecursionError): continue
-    if trees and re.search(r'(?im)^\s*(?:the function )?main(?:\(\))? is (?:the )?(?:CLI|command.line) entry ?point\b',response.answer):
+    if trees and re.search(r'(?im)^\s*(?:the function )?main(?:\(\))? is (?:the )?(?:CLI|command.line) entry ?point\b',prose):
         guarded=any(isinstance(node,ast.If) and ast.unparse(node.test) in {"__name__ == '__main__'","'__main__' == __name__"} and any(isinstance(c,ast.Call) and isinstance(c.func,ast.Name) and c.func.id=='main' for stmt in node.body for c in ast.walk(stmt)) for tree in trees.values() for node in tree.body)
         configured=False
         from .analyze import _python_aliases
@@ -83,7 +113,7 @@ def check_teaching_claims(settings, snapshot, response):
             except (ValueError,UnicodeError): continue
             configured |= any(isinstance(target,str) and target.partition(':')[2].strip()=='main' and any(target.partition(':')[0] in _python_aliases(path) for path in trees) for target in scripts.values())
         if not guarded and not configured: raise ValueError('The name main alone does not establish a command-line entry point')
-    if re.search(r'(?im)^\s*the empty check rejects whitespace.only (?:names|strings)\b',response.answer):
+    if re.search(r'(?im)^\s*the empty check rejects whitespace.only (?:names|strings)\b',prose):
         for tree in trees.values():
             for function in [n for n in tree.body if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef))]:
                 parameters={a.arg for a in function.args.args}

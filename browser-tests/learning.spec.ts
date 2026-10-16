@@ -259,6 +259,35 @@ test('an earlier step context blocks sending and keeps the unsent draft', async 
 });
 
 
+test('saved quotations repair their line evidence and keep failed drafts', async ({page}) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`/reviews/${ids.after}`);
+  await page.getByRole('button', {name:'Ask instructor',exact:true}).click();
+  const area = page.locator('#chat .chat-form textarea');
+  await page.getByLabel('Instructor mode').selectOption('answer');
+  await page.getByRole('button', {name:'Clear selected context'}).click();
+  await area.fill('MISLOCATED_QUOTE');
+  await page.getByRole('button', {name:'Ask the coach'}).click();
+  await expect(page.locator('.instructor-progress')).toContainText('Answer saved');
+  const answer = page.locator('.chat-log .message.assistant').last();
+  await expect(answer).toContainText('def handle(name):');
+  await expect(answer.getByRole('link',{name:'service.py:2',exact:true})).toHaveAttribute('href',/path=service.py&line=2/);
+  await area.fill('UNREPAIRED_QUOTE');
+  await page.getByRole('button', {name:'Ask the coach'}).click();
+  await expect(page.locator('.instructor-progress')).toContainText('failed:');
+  await expect(area).toHaveValue('UNREPAIRED_QUOTE');
+  await expect(page.locator('.chat-log .message.assistant').last()).toContainText('Coach · failed');
+  await expect(page.locator('.chat-log .message.assistant').last().locator('a.evidence')).toHaveCount(0);
+  await page.reload();
+  await page.getByRole('button', {name:'Ask instructor',exact:true}).click();
+  await expect(area).toHaveValue('UNREPAIRED_QUOTE');
+  await expect(page.locator('.chat-log')).toContainText('def handle(name):');
+  await area.fill('');
+  await page.getByRole('button', {name:'Close instructor',exact:true}).click();
+  expect(errors).toEqual([]);
+});
+
+
 test('private correction pauses practice until explicitly reviewed', async ({page}) => {
   await page.goto(`/reviews/${ids.after}#quiz`);
   const question=page.locator('#saved-quiz .quiz-card:visible');

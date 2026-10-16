@@ -12,6 +12,18 @@ Sources: [workspace regression cases](../../../tests/test_connected_workspace.py
 
 The unfiltered 234-test gate, ten-scenario browser run and diagnosed failures, strict 16-document validation, role mutation check, offline editable installation and isolated installed start/reuse/exit/restart evidence are recorded once in [the shared release verification](../verify-connected-learning-release/verification.md). That record also distinguishes Windows CI from the bounded sample's teaching defects and unfinished L17/N27 acceptance. No private reports, profiles or real learner responses are committed.
 
+## Teaching-guard correction — 17 October 2026
+
+**Evidence: 2/3 — the source/evidence boundary is checked with synthetic providers and actual headless/installed runtime; real teaching effectiveness remains unverified.**
+
+Red regressions reproduced two errors: matching a saved quotation anywhere in its cited file accepted unrelated line evidence, and Windows CRLF source rejected an otherwise exact multi-line quotation. Saved/captured fenced quotations now match a cited saved range with normalized line endings. Common headings, emphasis and list prefixes no longer bypass the existing narrow claim checks; fenced examples are treated as data, so hypothetical logs do not become alleged observed test results. These checks are not a complete Markdown parser or a semantic truth verifier.
+
+The new browser journey exercises a wrong-range answer through the shared queue, successful bounded repair, repeated invalid output, visible failure without evidence links, retained draft and reload. Existing review bytes and target source are unchanged. The first broader test run exposed an accidental fixture-variable edit; that edit was restored and the attempt-history regression remains enforced.
+
+Checks: **248 pytest cases passed** (89.74 seconds), **11 headless browser scenarios passed** (1.4 minutes), **16 strict OpenSpec documents passed**; the focused learning/API gate passed 75 cases. A quotation-condition mutation failed all four LF/CRLF/formatted-range cases; source was restored byte for byte and all four then passed. The installed editable CLI again passed isolated start/reuse/exit/restart, session and uncertainty persistence, unchanged synthetic source hashes, clean logs and zero inference jobs. No model or daily-use profile was loaded. Publication/CI evidence is recorded in the shared release verification after pushing the tested source.
+
+N15/N20 and L17/N27 remain open; this correction does not replace learner observation or final authorized model inspection.
+
 ## Limits and next action
 
 Captured dependencies and reading outlines do not establish runtime execution or passing tests. Valid citations do not establish correct teaching. Browser-close saving remains best effort; dynamic calls/configuration and unsupported languages remain qualified. N15/N20 remain awaiting real teaching inspection, and L17/N27 remains open. Keep this change unarchived and keep the tested application checkpoint linked to publication evidence; do not rewrite old snapshot artifacts.

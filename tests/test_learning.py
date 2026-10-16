@@ -248,6 +248,77 @@ def test_structured_feedback_keeps_source_only_claim_guard(saved_learning):
         check_teaching_claims(app.state.settings, snapshot, feedback)
 
 
+@pytest.mark.parametrize('newline', ['\n', '\r\n'])
+@pytest.mark.parametrize('label,fence', [('Saved code:', '```'), ('**Captured code:**', '~~~')])
+def test_saved_quote_matches_its_cited_range_with_windows_line_endings(saved_learning, newline, label, fence):
+    from archcoach.learning import check_teaching_claims
+    from archcoach.models import ChatResponse
+    app, _, _, _, review = saved_learning
+    snapshot = app.state.store.get_snapshot(app.state.store.get_review(review)['snapshot_id'])
+    text = newline.join(['def greet(name):', '    return "hello <" + name', ''])
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    blob = app.state.settings.blob_dir / digest[:2] / digest
+    blob.parent.mkdir(parents=True, exist_ok=True); blob.write_bytes(text.encode())
+    snapshot = {**snapshot, 'manifest': [{**snapshot['manifest'][0], 'sha256': digest}]}
+    quote = f'{label}\n{fence}python\ndef greet(name):\n    return "hello <" + name\n{fence}'
+    check_teaching_claims(app.state.settings, snapshot, ChatResponse(
+        answer=quote, citations=[{'path': 'main.py', 'line': 1, 'end_line': 2}]))
+    with pytest.raises(ValueError, match='cited'):
+        check_teaching_claims(app.state.settings, snapshot, ChatResponse(
+            answer=quote, citations=[{'path': 'main.py', 'line': 2}]))
+
+
+@pytest.mark.parametrize('repair_succeeds', [True, False])
+def test_mislocated_saved_quote_is_repaired_or_saved_as_failed(saved_learning, repair_succeeds):
+    from archcoach.review import ReviewEngine
+    app, client, _, _, review = saved_learning
+    calls = []
+    class FakeProvider:
+        last_usage = {}
+        def run_structured(self, prompt, *args, **kwargs):
+            calls.append(prompt)
+            return {'answer': 'Saved code:\n```python\ndef greet(name):\n```',
+                    'citations': [{'path': 'main.py', 'line': 1 if len(calls) == 2 and repair_succeeds else 2}]}
+    engine = ReviewEngine(app.state.settings, app.state.store); engine.codex = FakeProvider()
+    if repair_succeeds:
+        engine._run_chat(review, 'Show the saved declaration.')
+    else:
+        with pytest.raises(ValueError, match='cited'):
+            engine._run_chat(review, 'Show the saved declaration.')
+    assert len(calls) == 2
+    messages = app.state.store.conversation_for_review(review)['messages']
+    assert len(messages) == 2 and messages[0]['role'] == 'user'
+    assert messages[-1]['status'] == ('complete' if repair_succeeds else 'failed')
+    if repair_succeeds:
+        assert messages[-1]['citations'][0]['line'] == 1
+    else:
+        assert messages[-1]['citations'] == []
+    assert client.get(f'/reviews/{review}').status_code == 200
+
+
+@pytest.mark.parametrize('answer', [
+    '- All tests passed.', '**All tests passed.**', '1. These tests have passed.',
+    '## The tests are passing.', '> All tests passed.',
+])
+def test_formatted_test_result_claims_are_rejected(saved_learning, answer):
+    from archcoach.learning import check_teaching_claims
+    from archcoach.models import ChatResponse
+    app, _, _, _, review = saved_learning
+    snapshot = app.state.store.get_snapshot(app.state.store.get_review(review)['snapshot_id'])
+    with pytest.raises(ValueError, match='cannot claim tests passed'):
+        check_teaching_claims(app.state.settings, snapshot, ChatResponse(answer=answer))
+
+
+@pytest.mark.parametrize('fence', ['```', '~~~', '````'])
+def test_hypothetical_log_is_not_an_observed_test_result(saved_learning, fence):
+    from archcoach.learning import check_teaching_claims
+    from archcoach.models import ChatResponse
+    app, _, _, _, review = saved_learning
+    snapshot = app.state.store.get_snapshot(app.state.store.get_review(review)['snapshot_id'])
+    answer = f'Hypothetical log text, not an observed run:\n{fence}text\nAll tests passed.\n{fence}\nTests have not been run.'
+    check_teaching_claims(app.state.settings, snapshot, ChatResponse(answer=answer))
+
+
 def test_beginner_explanation_uses_saved_source_and_one_question(saved_learning):
     from archcoach.review import ReviewEngine
     app, _, _, project, review = saved_learning
