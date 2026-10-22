@@ -624,11 +624,11 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         try:
             resolve_selection(snapshot, review, data.selection, saved_walkthrough(review, snapshot, data.selection.id.rsplit(':',1)[0]) if data.selection and data.selection.kind == 'walkthrough' else None)
             state = {**store.learning_session(review_id), **changes}
-            if state.get('outline_id'):
+            if {'outline_id', 'step'} & changes.keys() and state.get('outline_id'):
                 outline = next((o for o in saved_walkthrough(review, snapshot, state['outline_id'].rsplit(':',1)[0])['outlines'] if o['id'] == state['outline_id']), None)
                 if not outline or not 0 <= (state.get('step') or 0) < len(outline['steps']):
                     raise ValueError('Session step is outside this saved outline')
-            if state.get('quiz_index') is not None and not 0 <= state['quiz_index'] < len(review['critique'].get('quiz', [])):
+            if 'quiz_index' in changes and state.get('quiz_index') is not None and not 0 <= state['quiz_index'] < len(review['critique'].get('quiz', [])):
                 raise ValueError('Session question is outside this saved quiz')
         except ValueError as exc: raise HTTPException(422, str(exc)) from exc
         return store.save_learning_session(review_id, changes)

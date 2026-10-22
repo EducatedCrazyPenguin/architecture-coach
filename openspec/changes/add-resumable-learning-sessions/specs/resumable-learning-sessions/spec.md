@@ -7,6 +7,14 @@ A suggested purpose, feature, lesson, two-question, optional explanation and nex
 - **WHEN** The owned server exits and restarts
 - **THEN** the same review restores its draft, question position and next step
 
+#### Scenario: Older positions cannot block an unrelated draft
+- **WHEN** a saved position refers to an unavailable outline, changed step count or older quiz position
+- **THEN** a partial draft update preserves that position without rejecting the new draft, while an explicit invalid position update remains rejected
+
+#### Scenario: Close-save preserves a draft with stale selection
+- **WHEN** a review has an instructor selection from an earlier outline format and the close-save handler runs
+- **THEN** it sends the draft fields without resubmitting stale selection or unrelated saved metadata, preserving the question without silently choosing a new subject
+
 ### Requirement: N22 Offline next steps
 My learning SHALL recommend unfinished work first, then due recall, then an unpractised evidenced concept, with an explanation. Mistakes and uncertainty SHALL be revisitable through existing history.
 

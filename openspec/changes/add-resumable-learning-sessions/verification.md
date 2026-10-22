@@ -24,6 +24,22 @@ N21 is reopened. The unpublished correction and regression changes are preserved
 
 **Next:** check and apply the preserved patch locally, inspect normal autosave ordering and actual keepalive response/state during the complete context, then run the focused and full headless gates without weakening the persistence assertions. After two failures, diagnose and report before another retry. Do not repeat the browser campaign blindly or load a model. Publish the correction and recheck N21 only after its full behavior passes. Normal navigation/Exit waits for saves; browser-close/crash persistence remains best effort.
 
+## Draft-persistence correction verified locally — 22 October 2026
+
+**Evidence: 3/3 — the specified synthetic API, browser and isolated installed-CLI behaviors ran on Windows/Python 3.12.10; crash/network-loss persistence and real teaching are outside this evidence.**
+
+The preserved patch hash matched the 17 October record before application. A fresh, focused red run reproduced all three older-position cases returning 422 for an unrelated draft update. The corrected route validates outline/step and quiz position only when those fields are explicitly changed; invalid explicit updates still return 422 without losing the draft. Normal autosave and page-close now share the draft payload, excluding stale walkthrough selections and unrelated saved position metadata. No database migration or snapshot rewrite is needed.
+
+The browser follow-up waits for the Overview navigation before setting its final unsaved words, invokes the actual page-close handler, checks the request and persisted state, reloads, and asserts the restored draft. Request/response diagnostics passed alone and with the two preceding learning scenarios. The complete diagnostic browser run passed eleven scenarios; after removing all diagnostic instrumentation, the complete clean run passed **11/11 in 1.4 minutes**. The earlier full-run loss was not reproduced and its precise mechanism remains unconfirmed; no general ordering guarantee is claimed. The test's navigation boundary is now explicit rather than timing-dependent.
+
+- `pytest -q` with fresh temporary storage: **251 passed**, no skips or deselections, 75.28 seconds; existing Starlette/httpx deprecation warning retained. Synthetic providers and the previously authorized pinned HTML renderer were used; no model loaded.
+- `playwright test`: **11 passed**, headless Edge, one worker, including actual protected Exit/restart, quiz attempts, instructor failures/cancellation, saved evidence and the close-save follow-up. No timeouts or persistence assertions were weakened.
+- `openspec validate --all --strict --json`: **16 passed**.
+- Mutation check: removing the outline-update condition caused **two failures and one pass** in the three focused cases. Exact original bytes were restored, then all three passed again.
+- Offline editable installation refresh used existing dependencies. The installed `archcoach` entry point ran without a development `PYTHONPATH`, reused its owned server on a second launch, retained draft/question/attempt state across restart, and exited cleanly. Source hashes were unchanged and the synthetic job table stayed empty. Only temporary synthetic storage was used; private daily data and the visible shortcut were not exercised.
+
+One clean gate attempt was interrupted before results; it was not counted as a pass. The completed fresh runs above supply the evidence. N21 is rechecked; N15/N20 and L17/N27 remain open. Publication and exact-source CI are recorded in the shared release verification. The old ignored patch is historical continuity only, not a pending instruction to reapply it.
+
 ## Limits and next action
 
 Captured dependencies and reading outlines do not establish runtime execution or passing tests. Valid citations do not establish correct teaching. Browser-close saving remains best effort; dynamic calls/configuration and unsupported languages remain qualified. N15/N20 remain awaiting real teaching inspection, and L17/N27 remains open. Keep this change unarchived and keep the tested application checkpoint linked to publication evidence; do not rewrite old snapshot artifacts.

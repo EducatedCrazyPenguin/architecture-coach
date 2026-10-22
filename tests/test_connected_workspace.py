@@ -478,3 +478,21 @@ def test_map_arrows_have_keyboard_selection_and_saved_evidence(tmp_path, monkeyp
     for suffix in ('', '/map'):
         assert 'id="map-manifest"' in client.get(f'/reviews/{rid}{suffix}').text
     assert app.state.store.get_review(rid)['architecture']['relationships'][0]['sources'][0]['path'] == 'main.py'
+
+
+@pytest.mark.parametrize('old_position', [{'outline_id':'missing.py:1','step':12}, {'outline_id':'main.py:2','step':29}, {'quiz_index':9}])
+def test_unrelated_draft_update_preserves_an_unavailable_older_position(tmp_path, monkeypatch, old_position):
+    app, client, ids = workspace(tmp_path, monkeypatch)
+    store=app.state.store; original=store.get_review(ids['before'])
+    rid=store.create_review(original['project_id'],original['snapshot_id'],None,'complete',original['architecture'],
+                           {**original['critique'],'quiz':original['critique']['quiz'][:1]},original['changes'],{},quality='complete')
+    store.save_learning_session(rid, {**old_position, 'draft':'Earlier question'})
+    headers={'X-ArchCoach-Token':app.state.csrf_token}
+    url=f'/api/reviews/{rid}/session'
+    response=client.patch(url,headers=headers,json={'draft':'Keep my new words'})
+    assert response.status_code==200
+    state=store.learning_session(rid)
+    assert state['draft']=='Keep my new words'
+    assert all(state[key]==value for key,value in old_position.items())
+    assert client.patch(url,headers=headers,json=old_position).status_code==422
+    assert store.learning_session(rid)['draft']=='Keep my new words'

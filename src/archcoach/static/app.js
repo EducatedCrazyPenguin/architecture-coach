@@ -216,14 +216,14 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
   const chatForm = document.querySelector(".chat-form");
+  function draftChanges() {
+    const selection=chatForm.elements.selection.value ? JSON.parse(chatForm.elements.selection.value):null;
+    const changes={draft:chatForm.querySelector('textarea').value,mode:chatForm.elements.mode.value,question_id:chatForm.elements.question_id.value || null};
+    if(selection?.kind !== 'walkthrough' || selection.outline_version === 3) changes.selection=selection;
+    return changes;
+  }
   function saveDraft() {
-    if(chatForm) {
-      const selection=chatForm.elements.selection.value ? JSON.parse(chatForm.elements.selection.value):null;
-      const changes={draft:chatForm.querySelector('textarea').value,mode:chatForm.elements.mode.value,question_id:chatForm.elements.question_id.value || null};
-      if(selection?.kind !== 'walkthrough' || selection.outline_version === 3) changes.selection=selection;
-      return saveSession(changes);
-    }
-    return Promise.resolve();
+    return chatForm ? saveSession(draftChanges()) : Promise.resolve();
   }
   if (chatForm) {
     const progress = instructor.querySelector(".instructor-progress");
@@ -315,8 +315,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelector('.exit-form')?.addEventListener('submit',async event=>{if(!sessionData)return;event.preventDefault();clearTimeout(draftTimer);if(await saveDraft() === false)return;const next=document.getElementById('session-next-step');if(next && await saveSession({next_step:next.value}) === false)return;event.target.submit();});
   window.addEventListener('pagehide',()=>{
     if(!sessionData || !chatForm)return;
-    const state={...sessionState,draft:chatForm.querySelector('textarea').value,mode:chatForm.elements.mode.value,question_id:chatForm.elements.question_id.value || null,selection:chatForm.elements.selection.value ? JSON.parse(chatForm.elements.selection.value):null};
-    delete state.updated_at;
+    const state=draftChanges();
     const next=document.getElementById('session-next-step');if(next)state.next_step=next.value;
     fetch(`/api/reviews/${sessionData.review_id}/session`,{method:'PATCH',keepalive:true,headers:{'Content-Type':'application/json','X-ArchCoach-Token':token},body:JSON.stringify(state)}).catch(()=>{});
   });

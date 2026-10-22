@@ -250,9 +250,17 @@ test('an earlier step context blocks sending and keeps the unsent draft', async 
   await page.getByRole('button',{name:'Ask the coach'}).click();
   await expect(page.locator('.instructor-progress')).toContainText('Select the saved step again');
   expect(sent).toBe(0);
+  await page.getByRole('button',{name:'Close instructor',exact:true}).click();
+  await Promise.all([page.waitForURL(`**/reviews/${ids.before}#overview`),page.getByRole('link',{name:'Overview',exact:true}).click()]);
+  await page.getByRole('button',{name:'Ask instructor',exact:true}).click();
+  const finalDraft='Keep the last unsaved words';
+  const closingSave=page.waitForRequest(request=>request.method()==='PATCH' && request.url().endsWith('/session') && request.postDataJSON().draft===finalDraft,{timeout:10000});
+  await page.evaluate(value=>{const element=document.querySelector<HTMLTextAreaElement>('#chat .chat-form textarea')!;element.value=value;setTimeout(()=>window.dispatchEvent(new Event('pagehide')),0);},finalDraft);
+  expect((await closingSave).postDataJSON()).not.toHaveProperty('selection');
+  await expect.poll(async()=>(await(await page.request.get(`/api/reviews/${ids.before}/session`)).json()).draft).toBe(finalDraft);
   await page.reload();
   await page.getByRole('button',{name:'Ask instructor',exact:true}).click();
-  await expect(area).toHaveValue('Keep this updated draft');
+  await expect(area).toHaveValue(finalDraft);
   await page.getByRole('button',{name:'Clear selected context'}).click();
   await area.fill('');
   await page.getByRole('button',{name:'Close instructor',exact:true}).click();
