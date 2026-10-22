@@ -32,7 +32,7 @@ Five fresh red cases showed that substring matching accepted a truncated return 
 
 Checks: **257 unfiltered pytest cases passed** (96.80 seconds), **eleven complete headless browser scenarios passed** (1.5 minutes), and the focused quotation/example/repair cases passed fifteen checks. The browser flow now supplies a truncated declaration with a correct citation and verifies a new repaired answer is saved; repeated malformed output remains failed with the draft retained. A deliberately inverted line comparison caused two of four focused cases to fail; exact source bytes were restored and all four passed. The installed CLI again passed protected start/reuse/exit/restart, retained synthetic learning state and unchanged source hashes, with zero inference jobs and clean logs. Specification validation and exact publication/CI are recorded in the shared release notes.
 
-N15/N20 and L17/N27 remain open. No model, private project or daily profile was used. Normalized complete-line matching is a narrow quotation check, not proof that an explanation or hypothetical example is correct.
+Published source `2f13afc87e9e5bf995123f396a2b149df804dae0` passed [exact Windows CI](https://github.com/EducatedCrazyPenguin/architecture-coach/actions/runs/39783340521): 257 pytest cases, eleven browser scenarios and sixteen strict specification checks. N15/N20 and L17/N27 remain open. No model, private project or daily profile was used. Normalized complete-line matching is a narrow quotation check, not proof that an explanation or hypothetical example is correct.
 
 ## Limits and next action
 
