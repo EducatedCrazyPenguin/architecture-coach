@@ -24,6 +24,16 @@ Checks: **248 pytest cases passed** (89.74 seconds), **11 headless browser scena
 
 N15/N20 and L17/N27 remain open; this correction does not replace learner observation or final authorized model inspection.
 
+## Complete-line quotation correction — 22 October 2026
+
+**Evidence: 3/3 — synthetic source/repair regressions and the headless application flow directly exercised this boundary; this does not verify arbitrary model reasoning.**
+
+Five fresh red cases showed that substring matching accepted a truncated return expression, an empty code block and a declaration without its final colon. The latter bypassed the chat repair path despite a valid source location. Saved/captured quotations now require nonempty complete contiguous saved lines. Line endings and an excerpt's common indentation are normalized; relative indentation is preserved. A complete body line can still be displayed without its outer indentation. The shared instructor validator supplies this behavior to normal answers and structured feedback without changing historical answers or extending the one-repair budget.
+
+Checks: **257 unfiltered pytest cases passed** (96.80 seconds), **eleven complete headless browser scenarios passed** (1.5 minutes), and the focused quotation/example/repair cases passed fifteen checks. The browser flow now supplies a truncated declaration with a correct citation and verifies a new repaired answer is saved; repeated malformed output remains failed with the draft retained. A deliberately inverted line comparison caused two of four focused cases to fail; exact source bytes were restored and all four passed. The installed CLI again passed protected start/reuse/exit/restart, retained synthetic learning state and unchanged source hashes, with zero inference jobs and clean logs. Specification validation and exact publication/CI are recorded in the shared release notes.
+
+N15/N20 and L17/N27 remain open. No model, private project or daily profile was used. Normalized complete-line matching is a narrow quotation check, not proof that an explanation or hypothetical example is correct.
+
 ## Limits and next action
 
 Captured dependencies and reading outlines do not establish runtime execution or passing tests. Valid citations do not establish correct teaching. Browser-close saving remains best effort; dynamic calls/configuration and unsupported languages remain qualified. N15/N20 remain awaiting real teaching inspection, and L17/N27 remains open. Keep this change unarchived and keep the tested application checkpoint linked to publication evidence; do not rewrite old snapshot artifacts.

@@ -30,7 +30,11 @@ New answers SHALL reject invalid citations and deterministically detectable unsu
 
 #### Scenario: Saved quotation must match its cited range
 - **WHEN** a new instructor answer labels a fenced block as saved or captured code
-- **THEN** its text must occur within a cited saved range after line-ending normalization, including formatted labels; a wrong range gets at most one repair before a visible failure
+- **THEN** its nonempty text must match complete contiguous lines within a cited saved range after line-ending and common-indentation normalization, including formatted labels; a wrong range or truncated line gets at most one repair before a visible failure
+
+#### Scenario: A substring is not a saved line
+- **WHEN** a quotation omits a line's suffix or declaration punctuation, or contains no code
+- **THEN** a valid location alone cannot make it a saved quotation; complete lines may shift their common indentation but must preserve relative indentation
 
 #### Scenario: Explanations distinguish formatted claims from examples
 - **WHEN** an answer uses headings, lists, emphasis or fenced examples

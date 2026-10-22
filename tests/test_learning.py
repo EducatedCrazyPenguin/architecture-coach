@@ -268,8 +268,24 @@ def test_saved_quote_matches_its_cited_range_with_windows_line_endings(saved_lea
             answer=quote, citations=[{'path': 'main.py', 'line': 2}]))
 
 
+@pytest.mark.parametrize('quote', ['    return "hello <"', 'def greet(name):\n    return "hello <"', '', 'return "hello <" + name'])
+def test_saved_quote_requires_complete_lines_not_substrings(saved_learning, quote):
+    from archcoach.learning import check_teaching_claims
+    from archcoach.models import ChatResponse
+    app, _, _, _, review = saved_learning
+    snapshot = app.state.store.get_snapshot(app.state.store.get_review(review)['snapshot_id'])
+    response = ChatResponse(answer=f'Saved code:\n```python\n{quote}\n```',
+                            citations=[{'path':'main.py','line':1,'end_line':2}])
+    if quote == 'return "hello <" + name':
+        check_teaching_claims(app.state.settings, snapshot, response)
+    else:
+        with pytest.raises(ValueError, match='cited'):
+            check_teaching_claims(app.state.settings, snapshot, response)
+
+
 @pytest.mark.parametrize('repair_succeeds', [True, False])
-def test_mislocated_saved_quote_is_repaired_or_saved_as_failed(saved_learning, repair_succeeds):
+@pytest.mark.parametrize('truncated', [True, False])
+def test_mislocated_saved_quote_is_repaired_or_saved_as_failed(saved_learning, repair_succeeds, truncated):
     from archcoach.review import ReviewEngine
     app, client, _, _, review = saved_learning
     calls = []
@@ -277,8 +293,10 @@ def test_mislocated_saved_quote_is_repaired_or_saved_as_failed(saved_learning, r
         last_usage = {}
         def run_structured(self, prompt, *args, **kwargs):
             calls.append(prompt)
-            return {'answer': 'Saved code:\n```python\ndef greet(name):\n```',
-                    'citations': [{'path': 'main.py', 'line': 1 if len(calls) == 2 and repair_succeeds else 2}]}
+            repaired = len(calls) == 2 and repair_succeeds
+            quote = 'def greet(name)' if truncated and not repaired else 'def greet(name):'
+            return {'answer': f'Saved code:\n```python\n{quote}\n```',
+                    'citations': [{'path': 'main.py', 'line': 1 if truncated or repaired else 2}]}
     engine = ReviewEngine(app.state.settings, app.state.store); engine.codex = FakeProvider()
     if repair_succeeds:
         engine._run_chat(review, 'Show the saved declaration.')

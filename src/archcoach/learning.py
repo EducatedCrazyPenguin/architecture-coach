@@ -1,6 +1,7 @@
 """Learning views read immutable records; no target code or provider is executed."""
 import ast
 import difflib
+from textwrap import dedent
 from .capture import read_blob
 from .models import Evidence
 
@@ -93,11 +94,16 @@ def check_teaching_claims(settings, snapshot, response):
         raise ValueError('A source-only instructor cannot claim tests passed')
     entries = {f['path']:f for f in snapshot['manifest']}
     contents = {ref.path:read_blob(settings,entries[ref.path]['sha256']).decode('utf-8',errors='replace') for ref in response.citations}
-    cited_ranges = ['\n'.join(contents[ref.path].splitlines()[ref.line - 1:ref.end_line or ref.line])
+    cited_ranges = [contents[ref.path].splitlines()[ref.line - 1:ref.end_line or ref.line]
                     for ref in response.citations]
     for quote in quotes:
-        if not any('\n'.join(quote.strip().splitlines()) in text for text in cited_ranges):
-            raise ValueError('An alleged saved quotation differs from its cited line range; label alternatives hypothetical')
+        quoted = quote.strip('\n')
+        size = len(quoted.splitlines())
+        if not quoted.strip() or not any(
+            dedent(quoted) == dedent('\n'.join(lines[start:start + size]))
+            for lines in cited_ranges for start in range(len(lines) - size + 1)
+        ):
+            raise ValueError('An alleged saved quotation differs from complete lines in its cited line range; label alternatives hypothetical')
     trees = {}
     for path,text in contents.items():
         if not path.endswith('.py') or len(text)>100_000: continue

@@ -83,10 +83,12 @@ class FixtureProvider:
                 if kwargs['cancelled']():
                     raise CodexCancelledError('Synthetic cancellation')
                 time.sleep(.1)
-        if 'MISLOCATED_QUOTE' in current_message or 'UNREPAIRED_QUOTE' in current_message:
-            repaired = 'MISLOCATED_QUOTE' in current_message and 'cited line range' in prompt
-            return {'answer': 'Saved code:\n```python\ndef handle(name):\n```',
-                    'citations': [{'path': 'service.py', 'line': 2 if repaired else 3}]}
+        if any(key in current_message for key in ('MISLOCATED_QUOTE', 'UNREPAIRED_QUOTE', 'TRUNCATED_QUOTE')):
+            truncated = 'TRUNCATED_QUOTE' in current_message
+            repaired = 'UNREPAIRED_QUOTE' not in current_message and 'cited line range' in prompt
+            quote = 'def handle(name)' if truncated and not repaired else 'def handle(name):'
+            return {'answer': f'Saved code:\n```python\n{quote}\n```',
+                    'citations': [{'path': 'service.py', 'line': 2 if truncated or repaired else 3}]}
         citations = [{'path': 'service.py', 'line': 3, 'end_line': 4}]
         if schema.stem == 'feedback':
             return {'correct_points': 'You identified the input boundary.',

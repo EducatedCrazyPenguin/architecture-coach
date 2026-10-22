@@ -56,7 +56,7 @@ The instructor offers a small hint, simpler/deeper explanation, feedback on your
 
 Use **This seems wrong** to record a private correction issue. Flagged questions are paused for future practice while historical attempts remain intact. The instructor’s **Private corrections** panel can mark an issue reviewed; this does not rewrite saved content or establish that it is correct. Generate a new review for corrected teaching material. The glossary connects basic architecture words to separately cited saved examples.
 
-New answers that label a fenced block **Saved code** or **Captured code** must match a cited saved line range, including Windows line endings. Common formatting does not bypass the narrow source-only claim checks. Invalid output receives at most one repair before a visible failure; these checks do not establish that every explanation is correct.
+New answers that label a fenced block **Saved code** or **Captured code** must match complete lines in a cited saved range, including Windows line endings. Common indentation can shift for display; truncated lines and empty quotations are rejected. Common formatting does not bypass the narrow source-only claim checks. Invalid output receives at most one repair before a visible failure; these checks do not establish that every explanation is correct.
 
 In a comparison, **Learn from this change** pairs two saved excerpts and asks you to predict possible affected callers. **Compare a concept across saved repos** keeps each origin separate. **Follow this improvement through** records user reports against a later saved review; planning files or observed source edits never prove implementation or passing tests.
 

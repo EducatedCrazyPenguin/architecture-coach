@@ -280,6 +280,12 @@ test('saved quotations repair their line evidence and keep failed drafts', async
   const answer = page.locator('.chat-log .message.assistant').last();
   await expect(answer).toContainText('def handle(name):');
   await expect(answer.getByRole('link',{name:'service.py:2',exact:true})).toHaveAttribute('href',/path=service.py&line=2/);
+  const savedAnswers = await page.locator('.chat-log .message.assistant').count();
+  await area.fill('TRUNCATED_QUOTE');
+  await page.getByRole('button', {name:'Ask the coach'}).click();
+  await expect(page.locator('.instructor-progress')).toContainText('Answer saved');
+  await expect(page.locator('.chat-log .message.assistant')).toHaveCount(savedAnswers + 1);
+  await expect(page.locator('.chat-log .message.assistant').last()).toContainText('def handle(name):');
   await area.fill('UNREPAIRED_QUOTE');
   await page.getByRole('button', {name:'Ask the coach'}).click();
   await expect(page.locator('.instructor-progress')).toContainText('failed:');
